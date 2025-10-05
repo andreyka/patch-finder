@@ -1,0 +1,59 @@
+"""Bootstrap evidence assembly for the new agent."""
+
+from __future__ import annotations
+
+import re
+from typing import Callable, List
+
+try:
+    from .config import BOOTSTRAP_SECTION_TOK_CAP, COMMIT_EXPAND_LIMIT
+    from .tools import extract_commit_links, tool_fetch_url, tool_web_search
+    from .tokenizer import truncate_to_token_cap
+except ImportError:  # pragma: no cover - script execution fallback
+    from config import BOOTSTRAP_SECTION_TOK_CAP, COMMIT_EXPAND_LIMIT
+    from tools import extract_commit_links, tool_fetch_url, tool_web_search
+    from tokenizer import truncate_to_token_cap
+
+
+def bootstrap_evidence(cve_id: str, debug: bool = False) -> str:
+    """Prefetch high-signal sources to shorten the LLM search loop."""
+
+    sections: List[str] = []
+
+    def add_section(title: str, body: str) -> None:
+        trimmed = truncate_to_token_cap(body, BOOTSTRAP_SECTION_TOK_CAP)
+        sections.append(f"### {title}\n{trimmed}\n")
+
+    urls = [
+        (f"NVD {cve_id}", f"https://nvd.nist.gov/vuln/detail/{cve_id}"),
+        (f"CVE.org {cve_id}", f"https://www.cve.org/CVERecord?id={cve_id}"),
+        (f"OSV API {cve_id}", f"https://api.osv.dev/v1/vulns/{cve_id}"),
+        (f"OSV page {cve_id}", f"https://osv.dev/vulnerability/{cve_id}"),
+        (f"Debian {cve_id}", f"https://security-tracker.debian.org/tracker/{cve_id}"),
+    ]
+
+    ghsa_block = tool_web_search(f'site:github.com/advisories "{cve_id}"', debug=debug)
+    add_section("GHSA search", ghsa_block)
+    ghsa_link = None
+    for match in re.finditer(r"https://github\.com/(?:advisories|[^/]+/[^/]+/security/advisories)/[^\s)]+", ghsa_block or ""):
+        ghsa_link = match.group(0)
+        break
+    if ghsa_link:
+        urls.insert(0, ("GHSA advisory", ghsa_link))
+
+    for title, url in urls:
+        fetched = tool_fetch_url(url, debug=debug)
+        add_section(title, fetched)
+
+    aggregate = "\n".join(sections)
+    commit_urls = extract_commit_links(aggregate)[:COMMIT_EXPAND_LIMIT]
+    if commit_urls:
+        expanded: List[str] = []
+        for commit_url in commit_urls:
+            expanded.append(tool_fetch_url(commit_url, debug=debug))
+        add_section("Expanded commit pages", "\n\n".join(expanded))
+
+    return "BOOTSTRAP EVIDENCE (pre-fetched for you to analyze quickly):\n\n" + "\n".join(sections)
+
+
+__all__ = ["bootstrap_evidence"]
