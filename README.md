@@ -10,7 +10,7 @@ Patch Finder is an LLM-assisted workflow that locates upstream fix commits for C
   - `beautifulsoup4`
   - `readability-lxml`
   - `pydantic`
-- A local vLLM server hosting `openai/gpt-oss-20b`.
+- A local vLLM server hosting `openai/gpt-oss-20b`. This server need to have at least RTX 4090 or more powerful GPU. 
 
 ## Environment variables
 
