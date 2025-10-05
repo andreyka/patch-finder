@@ -16,7 +16,7 @@ Patch Finder is an LLM-assisted workflow that locates upstream fix commits for C
 
 Set the variables below before running the agent. Without these variable the agent won't work correctly! 
 
-``````bash
+```bash
 export OPENAI_API_KEY="local"               # arbitrary value; vLLM ignores it but the SDK requires one
 export OPENAI_BASE_URL="http://localhost:8000/v1"  # matches the vLLM OpenAI-compatible endpoint
 export GOOGLE_CSE_ID="<your Google CSE ID>"
