@@ -110,7 +110,7 @@ vllm serve openai/gpt-oss-20b \
 python agent.py CVE-2025-0762 --debug
 ```
 
-- `--steps` controls the maximum number of LLM/tool interaction rounds (defaults to 50).
+- `--steps` controls the maximum number of LLM/tool interaction rounds (defaults to 60).
 - `--debug` prints detailed tool and retry diagnostics; omit it for quieter output.
 
 The agent prints either a validated success payload (`SuccessOut`) with commit coordinates or a structured error payload (`ErrorOut`).

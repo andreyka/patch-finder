@@ -349,7 +349,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("cve_id")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--steps", type=int, default=50)
+    parser.add_argument("--steps", type=int, default=60)
     parser.add_argument("--debug", action="store_true")
     return parser
 
