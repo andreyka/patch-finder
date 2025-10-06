@@ -55,6 +55,40 @@ def bootstrap_evidence(cve_id: str, debug: bool = False) -> str:
         ),
     ]
 
+    # First fetch NVD and CVE.org to extract potential bug references
+    nvd_content = tool_fetch_url(
+        f"https://nvd.nist.gov/vuln/detail/{cve_id}",
+        debug=debug
+    )
+    cve_content = tool_fetch_url(
+        f"https://www.cve.org/CVERecord?id={cve_id}",
+        debug=debug
+    )
+    
+    # Look for Chromium bug IDs in the fetched content
+    combined_content = nvd_content + " " + cve_content
+    chromium_bug_ids = set()
+    
+    # Extract bug IDs from various formats
+    for pattern in [
+        r"crbug\.com/(\d+)",
+        r"bugs\.chromium\.org/p/chromium/issues/detail\?id=(\d+)",
+        r"issues\.chromium\.org/issues/(\d+)",
+        r"Issue (\d{6,})",
+        r"Bug (\d{6,})",
+    ]:
+        for match in re.finditer(pattern, combined_content, re.IGNORECASE):
+            bug_id = match.group(1)
+            chromium_bug_ids.add(bug_id)
+    
+    # If we found Chromium bug IDs, try to fetch them directly
+    if chromium_bug_ids:
+        if debug:
+            print(f"[bootstrap] Found Chromium bug IDs: {chromium_bug_ids}")
+        for bug_id in sorted(chromium_bug_ids)[:3]:
+            bug_url = f"https://issues.chromium.org/issues/{bug_id}"
+            urls.insert(0, (f"Chromium bug {bug_id}", bug_url))
+
     ghsa_block = tool_web_search(
         f'site:github.com/advisories "{cve_id}"',
         debug=debug
@@ -70,6 +104,15 @@ def bootstrap_evidence(cve_id: str, debug: bool = False) -> str:
         break
     if ghsa_link:
         urls.insert(0, ("GHSA advisory", ghsa_link))
+
+    # Add specific Chromium searches if bug IDs were found
+    if chromium_bug_ids and len(chromium_bug_ids) > 0:
+        bug_id = sorted(chromium_bug_ids)[0]
+        chromium_commit_search = tool_web_search(
+            f'site:chromium.googlesource.com "{bug_id}" commit',
+            debug=debug
+        )
+        add_section("Chromium commit search", chromium_commit_search)
 
     for title, url in urls:
         fetched = tool_fetch_url(url, debug=debug)

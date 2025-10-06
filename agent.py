@@ -163,6 +163,9 @@ def run_agent(
             or "osv.dev" in content
             or "api.osv.dev" in content
             or "github.com/advisories" in content
+            or "issues.chromium.org" in content
+            or "crbug.com" in content
+            or "bugs.chromium.org" in content
         ):
             have_authority = True
         for url in re.findall(r"https?://[^\s)]+", content):
@@ -346,7 +349,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("cve_id")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--steps", type=int, default=12)
+    parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--debug", action="store_true")
     return parser
 

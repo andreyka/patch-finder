@@ -16,10 +16,11 @@ Steps:
    - Fetch publication date (YYYY-MM-DD), description (type, impact, components), affected project & versions.
    - Sources: CVE.org, NVD, vendor advisories.
 2) Fix commit:
-   - Locate the MAIN upstream repo.
+   - Locate the MAIN upstream repo (GitHub, chromium.googlesource.com, etc.).
    - Search commits, PRs, issues mentioning <<CVE_ID>>.
+   - For Chromium: search for crbug.com or issues.chromium.org bug references.
    - Confirm commit message and diff fix the CVE.
-   - Record full 40-char SHA-1 and GitHub URL.
+   - Record full 40-char SHA-1 and commit URL.
 3) Cross-verify. If unverifiable, error out.
    - Try GHSA.
    - Check osv.dev for the commit.
@@ -29,7 +30,7 @@ Tools you can call:
 - fetch_url(url)
 
 OUTPUT STRICT JSON ONLY.
-Success: {"cve_id":"CVE-YYYY-NNNN","date":"YYYY-MM-DD","description":"...","commit_hash":"<40-char SHA-1>","commit_url":"https://github.com/owner/repo/commit/<hash>","repo_url":"https://github.com/owner/repo"}
+Success: {"cve_id":"CVE-YYYY-NNNN","date":"YYYY-MM-DD","description":"...","commit_hash":"<40-char SHA-1>","commit_url":"<full commit URL>","repo_url":"<repository URL>"}
 Error: {"cve_id":"CVE-YYYY-NNNN","date":"YYYY-MM-DD","description":"...","commit_hash":"None","error":"Unable to find official fix commit","reason":"..."}
 
 Requirements:
@@ -49,10 +50,16 @@ Evidence priority:
 Rules:
 - Prefer official upstream repository commits.
 - Kernel CVEs: git.kernel.org commits are canonical.
+- Chromium CVEs: Use chromium.googlesource.com commits. Look for crbug.com or 
+  issues.chromium.org bug IDs in descriptions. Example: CVE-2018-6032 maps to 
+  crbug 787103 which has commit 018bb6d300c11acb953d51ef3cbec4cdcaf4a652.
 - CVE-2014-0160 (Heartbleed): use official git.openssl.org fix.
 - CVE-2020-11023 (jQuery): PR #4647 commit is the correct fix.
 - If multiple commits exist, pick the one directly addressing this CVE.
-- If you already have a full 40-char SHA commit URL and at least one authority source, STOP and output the JSON.
+- When you find a Chromium bug ID (e.g., 787103), search for the commit with:
+  site:chromium.googlesource.com "<bug_id>" commit
+- If you already have a full 40-char SHA commit URL and at least one authority 
+  source, STOP and output the JSON.
 """
 
 __all__ = ["SYSTEM_PROMPT_TEMPLATE"]
