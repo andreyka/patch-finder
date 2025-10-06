@@ -2,11 +2,55 @@
 
 Patch Finder is an LLM-assisted workflow that locates upstream fix commits for CVEs by orchestrating public data sources such as GitHub Security Advisories, OSV, and NVD. The agent relies on a local vLLM deployment of the `openai/gpt-oss-20b` model and enriches LLM output with targeted web and HTML scraping helpers.
 
+## How It Works
+
+The agent uses a multi-step approach to find CVE fix commits:
+
+1. **Bootstrap Phase**: Automatically fetches key sources (NVD, CVE.org, OSV, GHSA, Debian tracker) and extracts initial evidence including bug IDs, references, and potential commit URLs.
+
+2. **Iterative Search**: The LLM agent analyzes the evidence and performs targeted web searches and URL fetches to locate:
+   - Official bug tracker entries (GitHub Issues, Chromium bugs, kernel.org)
+   - Security advisories and commit references
+   - Source repository commits (GitHub, chromium.googlesource.com, git.kernel.org)
+
+3. **Verification**: Cross-references findings across multiple authoritative sources to ensure accuracy.
+
+4. **Extraction**: Extracts the full 40-character commit SHA-1 hash and constructs the complete commit URL.
+
+The agent can handle CVEs from various ecosystems:
+- **GitHub-based projects** (most npm, pip, Ruby packages)
+- **Chromium/Chrome** (googlesource.com repositories)
+- **Linux Kernel** (git.kernel.org, kernel mirrors)
+- **OpenSSL and other projects** (git.openssl.org, GitLab, etc.)
+
+## Important Limitations
+
+**Success is not guaranteed** and depends on several factors:
+
+1. **Information Availability**: The fix commit must be publicly documented in at least one of the checked sources (NVD, CVE.org, OSV, GHSA, vendor advisories, or search results).
+
+2. **AI Model Behavior**: The agent is a thin client to an AI model with probabilistic behavior. The same CVE may succeed or fail across different runs depending on:
+   - LLM reasoning paths taken
+   - Quality of search results returned by Google
+   - Tool calling decisions made by the model
+
+3. **Data Quality Issues**:
+   - CVE records may lack commit references
+   - Bug trackers may not link to commits
+   - Commits may not mention the CVE identifier
+   - Proprietary fixes may not be publicly disclosed
+
+4. **Network Dependencies**: Requires access to external services (NVD, Google Custom Search API, GitHub, etc.). Network issues or rate limits may cause failures.
+
+5. **Complex Repository Structures**: Some projects use non-standard workflows, mirrors, or private security fixes that are difficult to trace automatically.
+
+**Recommendation**: Always manually verify the returned commit by reviewing the diff and confirming it addresses the vulnerability described in the CVE.
+
 ## Prerequisites
 
 - Python 3.12+ with dependencies installed from `requirements.txt`
 - A local vLLM server hosting `openai/gpt-oss-20b` (requires at least RTX 4090 or more powerful GPU)
-- Google Cloud project with the Custom Search API enabled (for web search queries) 
+- Google Cloud project with the Custom Search API enabled (for web search queries), there is a number of requests avalible free of charge every day.  
 
 ## Environment variables
 
@@ -63,10 +107,10 @@ vllm serve openai/gpt-oss-20b \
 4. Run the agent and request a patch for a vulnerability with CVE identifier:
 
 ```bash
-python agent.py CVE-2025-0762 --steps 40 --debug
+python agent.py CVE-2025-0762 --debug
 ```
 
-- `--steps` controls the maximum number of LLM/tool interaction rounds (defaults to 30).
+- `--steps` controls the maximum number of LLM/tool interaction rounds (defaults to 50).
 - `--debug` prints detailed tool and retry diagnostics; omit it for quieter output.
 
 The agent prints either a validated success payload (`SuccessOut`) with commit coordinates or a structured error payload (`ErrorOut`).
