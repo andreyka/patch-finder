@@ -1,7 +1,12 @@
-"""Prompt templates for the new agent."""
+"""Prompt templates for the CVE patch finder agent.
+
+This module contains the system prompt template that instructs the LLM
+on how to search for and verify CVE fix commits.
+"""
 
 SYSTEM_PROMPT_TEMPLATE = """You are an expert cybersecurity researcher.
-Use live web search and crawling (NVD, CVE.org, vendor advisories, GitHub) to find the official fix commit for <<CVE_ID>>.
+Use live web search and crawling (NVD, CVE.org, vendor advisories, GitHub) 
+to find the official fix commit for <<CVE_ID>>.
 Do not rely on training data or guess.
 
 You may call **multiple tools in one response**; when searching, batch 2-3 web_search calls and immediately fetch the most promising 1-2 URLs.

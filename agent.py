@@ -40,20 +40,45 @@ from tools import (
 )
 
 def _client(base_url: Optional[str]) -> OpenAI:
-    return OpenAI(base_url=base_url or DEFAULT_BASE_URL, api_key=os.environ.get("OPENAI_API_KEY", "sk-local"))
+    """Create an OpenAI client with the specified base URL.
+    
+    Args:
+        base_url: The base URL for the OpenAI API, or None for default.
+        
+    Returns:
+        An initialized OpenAI client instance.
+    """
+    return OpenAI(
+        base_url=base_url or DEFAULT_BASE_URL,
+        api_key=os.environ.get("OPENAI_API_KEY", "sk-local")
+    )
 
 
 def _call_chat(
     client: OpenAI,
     model: str,
     messages: List[Dict[str, Any]],
-    tools,
+    tools: List[Dict[str, Any]],
     max_tokens: int,
     debug: bool,
-):
+) -> Any:
+    """Call the chat completion API with the given parameters.
+    
+    Args:
+        client: The OpenAI client instance.
+        model: The model name to use.
+        messages: List of message dictionaries.
+        tools: List of available tools.
+        max_tokens: Maximum tokens for completion.
+        debug: Whether to print debug information.
+        
+    Returns:
+        The chat completion response.
+    """
     mt = max(1, int(max_tokens))
     if debug:
-        print(f"[chat] send: prompt_tokens={messages_token_sum(messages)}, max_tokens={mt}")
+        token_sum = messages_token_sum(messages)
+        print(f"[chat] send: prompt_tokens={token_sum}, max_tokens={mt}")
     return client.chat.completions.create(
         model=model,
         messages=messages,
@@ -65,7 +90,26 @@ def _call_chat(
     )
 
 
-def run_agent(cve_id: str, model: Optional[str], base_url: Optional[str], steps: int, debug: bool) -> Dict[str, Any]:
+def run_agent(
+    cve_id: str,
+    model: Optional[str],
+    base_url: Optional[str],
+    steps: int,
+    debug: bool
+) -> Dict[str, Any]:
+    """Run the agent to find the fix commit for a CVE.
+    
+    Args:
+        cve_id: The CVE identifier (e.g., 'CVE-2025-0762').
+        model: The model name to use, or None for default.
+        base_url: The API base URL, or None for default.
+        steps: Maximum number of interaction rounds.
+        debug: Whether to print debug information.
+        
+    Returns:
+        A dictionary containing the CVE information and fix commit,
+        or an error structure if the fix cannot be found.
+    """
     client = _client(base_url)
     model_name = model or DEFAULT_MODEL
 
@@ -93,14 +137,29 @@ def run_agent(cve_id: str, model: Optional[str], base_url: Optional[str], steps:
     guard = ProgressGuard(NO_PROGRESS_WINDOW, NO_PROGRESS_PATIENCE)
 
     def tool_signature() -> str:
+        """Generate a signature from recent tool messages.
+        
+        Returns:
+            A string signature based on the last 3 tool messages.
+        """
         last = [m for m in messages if m.get("role") == "tool"][-3:]
-        return "|".join(f"{m.get('name')}:{(m.get('content') or '')[:64]}" for m in last)
+        return "|".join(
+            f"{m.get('name')}:{(m.get('content') or '')[:64]}" for m in last
+        )
 
     def add_tool_message(name: str, tool_call_id: str, content: str) -> None:
+        """Add a tool response message and update tracking state.
+        
+        Args:
+            name: The name of the tool that was called.
+            tool_call_id: The unique identifier for this tool call.
+            content: The content returned by the tool.
+        """
         nonlocal have_authority
         if (
             "nvd.nist.gov/vuln/detail" in content
-            or ("github.com/" in content and "/security/advisories/" in content)
+            or ("github.com/" in content and 
+                "/security/advisories/" in content)
             or "osv.dev" in content
             or "api.osv.dev" in content
             or "github.com/advisories" in content
@@ -110,10 +169,18 @@ def run_agent(cve_id: str, model: Optional[str], base_url: Optional[str], steps:
             for pattern in COMMIT_PATTERNS:
                 if pattern.search(url):
                     seen_commit_urls[url] = seen_commit_urls.get(url, 0) + 1
-        messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": name, "content": content})
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "name": name,
+            "content": content
+        })
 
         if AUTO_EXPAND_COMMITS:
-            new_commits = [u for u in extract_commit_links(content) if u not in fetch_cache]
+            new_commits = [
+                u for u in extract_commit_links(content)
+                if u not in fetch_cache
+            ]
             if new_commits:
                 expanded_payloads: List[str] = []
                 for commit_url in new_commits[:COMMIT_EXPAND_LIMIT]:
@@ -122,43 +189,62 @@ def run_agent(cve_id: str, model: Optional[str], base_url: Optional[str], steps:
                     expanded_payloads.append(expanded)
                     for pattern in COMMIT_PATTERNS:
                         if pattern.search(commit_url):
-                            seen_commit_urls[commit_url] = seen_commit_urls.get(commit_url, 0) + 1
+                            seen_commit_urls[commit_url] = (
+                                seen_commit_urls.get(commit_url, 0) + 1
+                            )
                 if expanded_payloads:
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": "AUTO-EXPANDED COMMIT PAGES:\n\n" + "\n\n".join(expanded_payloads),
-                        }
-                    )
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "AUTO-EXPANDED COMMIT PAGES:\n\n" +
+                            "\n\n".join(expanded_payloads)
+                        ),
+                    })
 
     for step in range(1, max(1, steps) + 1):
         if debug:
             print(f"[step {step}] chat | model={model_name}")
 
-        have_full_sha = any(re.search(r"/commit/([0-9a-f]{40})(?:\b|$)", url) for url in seen_commit_urls)
+        have_full_sha = any(
+            re.search(r"/commit/([0-9a-f]{40})(?:\b|$)", url)
+            for url in seen_commit_urls
+        )
         if have_full_sha and have_authority:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "You already have a full 40-char SHA commit URL and at least one authority (NVD/GHSA/OSV). "
-                        "Output the STRICT JSON now, with all required fields."
-                    ),
-                }
-            )
+            messages.append({
+                "role": "user",
+                "content": (
+                    "You already have a full 40-char SHA commit URL and "
+                    "at least one authority (NVD/GHSA/OSV). "
+                    "Output the STRICT JSON now, with all required fields."
+                ),
+            })
 
         prompt_messages, available_tokens = build_prompt_that_fits(messages, debug=debug)
         max_tokens = max(1, available_tokens)
 
         try:
-            response = _call_chat(client, model_name, prompt_messages, TOOLS, max_tokens, debug)
+            response = _call_chat(
+                client, model_name, prompt_messages, TOOLS, max_tokens, debug
+            )
         except Exception as exc:
             if debug:
                 print(f"[chat error] {exc}")
-            minimal = messages[:2] + [m for m in messages[2:] if m.get("role") == "tool"][-10:]
-            prompt_messages, available_tokens = build_prompt_that_fits(minimal, debug=debug)
+            minimal = (
+                messages[:2] +
+                [m for m in messages[2:] if m.get("role") == "tool"][-10:]
+            )
+            prompt_messages, available_tokens = build_prompt_that_fits(
+                minimal, debug=debug
+            )
             try:
-                response = _call_chat(client, model_name, prompt_messages, TOOLS, min(512, available_tokens), debug)
+                response = _call_chat(
+                    client,
+                    model_name,
+                    prompt_messages,
+                    TOOLS,
+                    min(512, available_tokens),
+                    debug
+                )
             except Exception as hard_exc:
                 if debug:
                     print(f"[chat hard fail] {hard_exc}")
@@ -246,8 +332,16 @@ def run_agent(cve_id: str, model: Optional[str], base_url: Optional[str], steps:
 __all__ = ["run_agent", "TOOLS", "build_arg_parser", "main"]
 
 def build_arg_parser() -> argparse.ArgumentParser:
+    """Build the command-line argument parser.
+    
+    Returns:
+        An ArgumentParser configured with all CLI options.
+    """
     parser = argparse.ArgumentParser(
-        description="Find the official upstream fix commit for a CVE (128k context agent)."
+        description=(
+            "Find the official upstream fix commit for a CVE "
+            "(128k context agent)."
+        )
     )
     parser.add_argument("cve_id")
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -258,9 +352,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Main entry point for the CLI."""
     parser = build_arg_parser()
     args = parser.parse_args()
-    result = run_agent(args.cve_id, args.model, args.base_url, args.steps, args.debug)
+    result = run_agent(
+        args.cve_id, args.model, args.base_url, args.steps, args.debug
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

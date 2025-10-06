@@ -32,8 +32,25 @@ except ImportError:  # pragma: no cover - script execution fallback
     )
 
 
-def build_prompt_that_fits(messages: List[Dict[str, str]], debug: bool = False) -> Tuple[List[Dict[str, str]], int]:
-    """Return a prompt trimmed to respect model context limits."""
+def build_prompt_that_fits(
+    messages: List[Dict[str, str]],
+    debug: bool = False
+) -> Tuple[List[Dict[str, str]], int]:
+    """Return a prompt trimmed to respect model context limits.
+    
+    This function ensures the prompt fits within MAX_MODEL_LEN by:
+    1. Keeping system and initial user messages
+    2. Limiting tool messages to MAX_TOOL_MSGS most recent
+    3. Truncating large tool responses to TOOL_TRUNC_TOK
+    4. Dropping older non-tool messages if needed
+    
+    Args:
+        messages: The full list of message dictionaries.
+        debug: Whether to print debug information.
+        
+    Returns:
+        A tuple of (trimmed_messages, available_tokens_for_completion).
+    """
 
     base = messages[:2]
     remainder = messages[2:]

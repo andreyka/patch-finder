@@ -22,14 +22,47 @@ else:
 
 
 def message_token_count(message: Dict[str, str]) -> int:
+    """Count tokens in a single message.
+    
+    Args:
+        message: A message dictionary with 'content' field.
+        
+    Returns:
+        The token count including message overhead.
+    """
     return 4 + token_count(message.get("content"))
 
 
 def messages_token_sum(messages: List[Dict[str, str]]) -> int:
+    """Calculate the total token count for a list of messages.
+    
+    Args:
+        messages: A list of message dictionaries.
+        
+    Returns:
+        The total token count.
+    """
     return sum(message_token_count(m) for m in messages)
 
 
-def truncate_to_token_cap(text: str, cap_tokens: int, marker: str = "...[truncated]") -> str:
+def truncate_to_token_cap(
+    text: str,
+    cap_tokens: int,
+    marker: str = "...[truncated]"
+) -> str:
+    """Truncate text to fit within a token budget.
+    
+    Uses binary search to find the longest substring that fits
+    within the token limit.
+    
+    Args:
+        text: The text to truncate.
+        cap_tokens: The maximum number of tokens allowed.
+        marker: The marker to append if text is truncated.
+        
+    Returns:
+        The truncated text with marker if applicable.
+    """
     if cap_tokens <= 0:
         return ""
     low, high, best = 0, len(text), text

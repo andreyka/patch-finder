@@ -7,6 +7,15 @@ from typing import Dict
 
 
 def _env_flag(name: str, default: bool = True) -> bool:
+    """Parse a boolean flag from an environment variable.
+    
+    Args:
+        name: The environment variable name.
+        default: The default value if not set.
+        
+    Returns:
+        The boolean value of the environment variable.
+    """
     raw = os.environ.get(name)
     if raw is None:
         return default

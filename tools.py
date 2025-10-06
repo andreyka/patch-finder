@@ -38,15 +38,38 @@ COMMIT_PATTERNS = [
 
 
 def _soup(html: str) -> BeautifulSoup:
+    """Create a BeautifulSoup object with the best available parser.
+    
+    Args:
+        html: The HTML string to parse.
+        
+    Returns:
+        A BeautifulSoup object.
+    """
     try:
         return BeautifulSoup(html, "lxml")
     except FeatureNotFound:  # pragma: no cover - environment dependent
         return BeautifulSoup(html, "html.parser")
 
 
-def _soup_title_and_canonical(soup: BeautifulSoup, url: str) -> Tuple[str, str]:
+def _soup_title_and_canonical(
+    soup: BeautifulSoup,
+    url: str
+) -> Tuple[str, str]:
+    """Extract the title and canonical URL from a parsed HTML page.
+    
+    Args:
+        soup: The BeautifulSoup object representing the page.
+        url: The original URL of the page.
+        
+    Returns:
+        A tuple of (title, canonical_url).
+    """
     canonical = ""
-    link_canon = soup.find("link", rel=lambda v: v and "canonical" in v.lower())
+    link_canon = soup.find(
+        "link",
+        rel=lambda v: v and "canonical" in v.lower()
+    )
     if link_canon and link_canon.get("href"):
         canonical = urljoin(url, link_canon["href"].strip())
     og_title = soup.find("meta", property="og:title")
@@ -60,6 +83,17 @@ def _soup_title_and_canonical(soup: BeautifulSoup, url: str) -> Tuple[str, str]:
 
 
 def _soup_visible_text(soup: BeautifulSoup) -> str:
+    """Extract visible text from a BeautifulSoup object.
+    
+    Removes script, style, navigation, and other non-content elements
+    before extracting text.
+    
+    Args:
+        soup: The BeautifulSoup object to extract text from.
+        
+    Returns:
+        The cleaned, visible text content.
+    """
     for tag in ("script", "style", "noscript", "template", "svg", "math"):
         for element in soup.find_all(tag):
             element.decompose()
@@ -71,6 +105,17 @@ def _soup_visible_text(soup: BeautifulSoup) -> str:
 
 
 def extract_commit_links(text_or_html: str) -> List[str]:
+    """Extract commit URLs from text or HTML content.
+    
+    Searches for commit links from GitHub, git.kernel.org, git.openssl.org,
+    and other common Git hosting services.
+    
+    Args:
+        text_or_html: The text or HTML content to search.
+        
+    Returns:
+        A list of unique commit URLs found in the content.
+    """
     out: List[str] = []
     seen: set[str] = set()
     for pat in COMMIT_PATTERNS:
@@ -78,30 +123,64 @@ def extract_commit_links(text_or_html: str) -> List[str]:
             url = match.group(0)
             if "git.openssl.org" in url:
                 sha = match.group(1)
-                url = f"https://git.openssl.org/gitweb/?p=openssl.git;a=commit;h={sha}"
+                url = (
+                    f"https://git.openssl.org/gitweb/"
+                    f"?p=openssl.git;a=commit;h={sha}"
+                )
             if url not in seen:
                 seen.add(url)
                 out.append(url)
     return out
 
 
-def extract_commit_links_from_soup(soup: BeautifulSoup, base_url: str) -> List[str]:
+def extract_commit_links_from_soup(
+    soup: BeautifulSoup,
+    base_url: str
+) -> List[str]:
+    """Extract commit URLs from anchor tags in a BeautifulSoup object.
+    
+    Args:
+        soup: The BeautifulSoup object to search.
+        base_url: The base URL for resolving relative links.
+        
+    Returns:
+        A sorted list of unique commit URLs found in the page.
+    """
     links: set[str] = set()
     for anchor in soup.find_all("a", href=True):
         href = urljoin(base_url, anchor["href"])
         for pat in COMMIT_PATTERNS:
             if pat.search(href):
                 if "git.openssl.org" in href:
-                    match = re.search(r";a=commit;h=([0-9a-f]{7,40})", href)
+                    match = re.search(
+                        r";a=commit;h=([0-9a-f]{7,40})",
+                        href
+                    )
                     if match:
-                        href = f"https://git.openssl.org/gitweb/?p=openssl.git;a=commit;h={match.group(1)}"
+                        sha = match.group(1)
+                        href = (
+                            f"https://git.openssl.org/gitweb/"
+                            f"?p=openssl.git;a=commit;h={sha}"
+                        )
                 links.add(href)
     return sorted(links)
 
 
 def tool_web_search(query: str, debug: bool = False) -> str:
+    """Perform a Google Custom Search and return formatted results.
+    
+    Args:
+        query: The search query string.
+        debug: Whether to print debug information.
+        
+    Returns:
+        A formatted string with search results, or an error message.
+    """
     if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
-        return "ERROR: Google Search not configured (set GOOGLE_API_KEY and GOOGLE_CSE_ID)."
+        return (
+            "ERROR: Google Search not configured "
+            "(set GOOGLE_API_KEY and GOOGLE_CSE_ID)."
+        )
     if debug:
         print(f"[tool:web_search] {query}")
     try:
@@ -132,6 +211,16 @@ def tool_web_search(query: str, debug: bool = False) -> str:
 
 
 def tool_fetch_url(url: str, debug: bool = False) -> str:
+    """Fetch a URL and return extracted text with commit references.
+    
+    Args:
+        url: The URL to fetch.
+        debug: Whether to print debug information.
+        
+    Returns:
+        A formatted string with the page title, URL, commit references,
+        and visible text content, or an error message.
+    """
     if debug:
         print(f"[tool:fetch_url] {url}")
     try:

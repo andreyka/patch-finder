@@ -16,26 +16,56 @@ except ImportError:  # pragma: no cover - script execution fallback
 
 
 def bootstrap_evidence(cve_id: str, debug: bool = False) -> str:
-    """Prefetch high-signal sources to shorten the LLM search loop."""
-
+    """Prefetch high-signal sources to shorten the LLM search loop.
+    
+    Fetches CVE information from multiple authoritative sources including
+    NVD, CVE.org, OSV, GHSA, and Debian tracker, then expands any
+    commit URLs found.
+    
+    Args:
+        cve_id: The CVE identifier to research.
+        debug: Whether to print debug information.
+        
+    Returns:
+        A formatted string containing evidence from all sources.
+    """
     sections: List[str] = []
 
     def add_section(title: str, body: str) -> None:
+        """Add a section to the evidence collection.
+        
+        Args:
+            title: The section title.
+            body: The section content.
+        """
         trimmed = truncate_to_token_cap(body, BOOTSTRAP_SECTION_TOK_CAP)
         sections.append(f"### {title}\n{trimmed}\n")
 
     urls = [
-        (f"NVD {cve_id}", f"https://nvd.nist.gov/vuln/detail/{cve_id}"),
+        (
+            f"NVD {cve_id}",
+            f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+        ),
         (f"CVE.org {cve_id}", f"https://www.cve.org/CVERecord?id={cve_id}"),
         (f"OSV API {cve_id}", f"https://api.osv.dev/v1/vulns/{cve_id}"),
         (f"OSV page {cve_id}", f"https://osv.dev/vulnerability/{cve_id}"),
-        (f"Debian {cve_id}", f"https://security-tracker.debian.org/tracker/{cve_id}"),
+        (
+            f"Debian {cve_id}",
+            f"https://security-tracker.debian.org/tracker/{cve_id}"
+        ),
     ]
 
-    ghsa_block = tool_web_search(f'site:github.com/advisories "{cve_id}"', debug=debug)
+    ghsa_block = tool_web_search(
+        f'site:github.com/advisories "{cve_id}"',
+        debug=debug
+    )
     add_section("GHSA search", ghsa_block)
     ghsa_link = None
-    for match in re.finditer(r"https://github\.com/(?:advisories|[^/]+/[^/]+/security/advisories)/[^\s)]+", ghsa_block or ""):
+    pattern = (
+        r"https://github\.com/(?:advisories|"
+        r"[^/]+/[^/]+/security/advisories)/[^\s)]+"
+    )
+    for match in re.finditer(pattern, ghsa_block or ""):
         ghsa_link = match.group(0)
         break
     if ghsa_link:
@@ -53,7 +83,10 @@ def bootstrap_evidence(cve_id: str, debug: bool = False) -> str:
             expanded.append(tool_fetch_url(commit_url, debug=debug))
         add_section("Expanded commit pages", "\n\n".join(expanded))
 
-    return "BOOTSTRAP EVIDENCE (pre-fetched for you to analyze quickly):\n\n" + "\n".join(sections)
+    return (
+        "BOOTSTRAP EVIDENCE (pre-fetched for you to analyze quickly):\n\n" +
+        "\n".join(sections)
+    )
 
 
 __all__ = ["bootstrap_evidence"]
