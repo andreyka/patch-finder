@@ -4,23 +4,19 @@ Patch Finder is an LLM-assisted workflow that locates upstream fix commits for C
 
 ## Prerequisites
 
-- Python 3.12+ environment with the following packages installed:
-  - `openai`
-  - `httpx`
-  - `beautifulsoup4`
-  - `readability-lxml`
-  - `pydantic`
-- A local vLLM server hosting `openai/gpt-oss-20b`. This server need to have at least RTX 4090 or more powerful GPU. 
+- Python 3.12+ with dependencies installed from `requirements.txt`
+- A local vLLM server hosting `openai/gpt-oss-20b` (requires at least RTX 4090 or more powerful GPU)
+- Google Cloud project with the Custom Search API enabled (for web search queries) 
 
 ## Environment variables
 
-Set the variables below before running the agent. Without these variable the agent won't work correctly! 
+Set the variables below before running the agent. Without these variables the agent won't work correctly! 
 
 ```bash
-export OPENAI_API_KEY="local"               # arbitrary value; vLLM ignores it but the SDK requires one
+export OPENAI_API_KEY="local"                      # arbitrary value; vLLM ignores it but the SDK requires one
 export OPENAI_BASE_URL="http://localhost:8000/v1"  # matches the vLLM OpenAI-compatible endpoint
-export GOOGLE_CSE_ID="<your Google CSE ID>"
-export GOOGLE_API_KEY="<your Google API key>"
+export GOOGLE_CSE_ID="<your Google CSE ID>"        # you can find it at https://programmablesearchengine.google.com/controlpanel/all
+export GOOGLE_API_KEY="<your Google API key>"      # Google Cloud API Key for your project
 ```
 
 Optional overrides:
@@ -31,9 +27,19 @@ Optional overrides:
 - `PATCH_FINDER_TOP_P` (default `1.0`)
 - `PATCH_FINDER_MAX_CONTEXT_CHARS` (default `48000`)
 
-## Run vLLM with GPT-OSS
+## How to use
 
-Launch vLLM with the OpenAI-compatible server so the agent can reach it through the standard OpenAI SDK. Example command (run in WSL or Linux shell):
+1. Create a new Python environment and install all needed dependencies:
+
+```bash
+uv venv --python 3.12
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+uv pip install -r requirements.txt
+```
+
+2. Set the required environment variables (see [Environment variables](#environment-variables) section above).
+
+3. Launch vLLM with the OpenAI-compatible server so the agent can reach it through the standard OpenAI SDK. Example command (run in WSL or Linux shell):
 
 ```bash
 vllm serve openai/gpt-oss-20b \
@@ -46,11 +52,15 @@ vllm serve openai/gpt-oss-20b \
   --enable-auto-tool-choice
 ```
 
-Adjust `--host`/`--port` as needed and ensure the server matches the URL set in `OPENAI_BASE_URL`.
+   Adjust `--host`/`--port` as needed and ensure the server matches the URL set in `OPENAI_BASE_URL`. 
+   
+   The provided `requirements.txt` already has all needed dependencies. If you want to configure your vLLM serving API on a different machine, install the server dependencies:
+   
+   ```bash
+   uv pip install vllm openai httpx python-dotenv readability-lxml beautifulsoup4 lxml rapidfuzz pydantic tiktoken
+   ``` 
 
-## Usage
-
-Run the CLI to triage a CVE:
+4. Run the agent and request a patch for a vulnerability with CVE identifier:
 
 ```bash
 python agent.py CVE-2025-0762 --steps 40 --debug
