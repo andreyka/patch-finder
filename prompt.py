@@ -35,9 +35,9 @@ IMPORTANT: Tool Call Format Examples
   fetch_url: {"url": "https://github.com/advisories/GHSA-xxxx-xxxx-xxxx"}
 
 ✗ WRONG - Do NOT add trailing commas or extra fields:
-  {"query": "some search",""} ❌ INVALID JSON
-  {"query": "some search",} ❌ INVALID JSON
-  {"query":} ❌ INVALID JSON
+  {"query": "some search",""} ✗ INVALID JSON
+  {"query": "some search",} ✗ INVALID JSON
+  {"query":} ✗ INVALID JSON
 
 Always provide complete, valid JSON for tool arguments.
 
