@@ -27,6 +27,8 @@ UA = os.environ.get("PATCH_FINDER_USER_AGENT", "patch-finder/4.2 (+https://examp
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "").strip()
 GOOGLE_CSE_ID = os.environ.get("GOOGLE_CSE_ID", "").strip()
 
+GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "").strip()
+
 HTTP_PROXIES: Dict[str, str] = {}
 if proxy := os.environ.get("HTTP_PROXY"):
     HTTP_PROXIES["http"] = proxy

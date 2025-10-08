@@ -70,8 +70,8 @@ export OPENAI_API_KEY="local"                      # arbitrary value; vLLM ignor
 export OPENAI_BASE_URL="http://localhost:8000/v1"  # matches the vLLM OpenAI-compatible endpoint
 export GOOGLE_CSE_ID="<your Google CSE ID>"        # you can find it at https://programmablesearchengine.google.com/controlpanel/all
 export GOOGLE_API_KEY="<your Google API key>"      # Google Cloud API Key for your project
+export GITLAB_TOKEN="<your GitLab personal access token>"  # GitLab Personal Access Token with read_api scope
 ```
- 
 **Without these variables the agent won't work correctly!**
 
 Optional overrides:

@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup, FeatureNotFound
 
 from config import (
     FETCH_TEXT_CAP,
+    GITLAB_TOKEN,
     GOOGLE_API_KEY,
     GOOGLE_CSE_ID,
     HTTP_PROXIES,
@@ -218,10 +219,19 @@ def tool_fetch_url(url: str, debug: bool = False) -> str:
     """
     if debug:
         print(f"[tool:fetch_url] {url}")
+    
+    headers = {"User-Agent": UA}
+    
+    # Add GitLab authentication if accessing GitLab and token is available
+    if GITLAB_TOKEN and ("gitlab.com" in url.lower() or "gitlab." in url.lower()):
+        headers["PRIVATE-TOKEN"] = GITLAB_TOKEN
+        if debug:
+            print(f"[tool:fetch_url] Using GitLab token for authentication")
+    
     try:
         response = requests.get(
             url,
-            headers={"User-Agent": UA},
+            headers=headers,
             proxies=HTTP_PROXIES,
             timeout=REQUEST_TIMEOUT,
         )
