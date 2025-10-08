@@ -30,9 +30,10 @@ The agent can handle CVEs from various ecosystems:
 1. **Information Availability**: The fix commit must be publicly documented in at least one of the checked sources (NVD, CVE.org, OSV, GHSA, vendor advisories, or search results).
 
 2. **AI Model Behavior**: The agent is a thin client to an AI model with probabilistic behavior. The same CVE may succeed or fail across different runs depending on:
-   - LLM reasoning paths taken
+   - Information available in the internet 
    - Quality of search results returned by Google
    - Tool calling decisions made by the model
+   - Hallucinations and any other potential mistakes that a model can make 
 
 3. **Data Quality Issues**:
    - CVE records may lack commit references
@@ -50,7 +51,7 @@ The agent can handle CVEs from various ecosystems:
 
 - Python 3.12+ with dependencies installed from `requirements.txt`
 - A local vLLM server hosting `openai/gpt-oss-20b` (requires at least RTX 4090 or more powerful GPU)
-- Google Cloud project with the Custom Search API enabled (for web search queries), there is a number of requests avalible free of charge every day.  
+- Google Cloud project with the Custom Search API enabled (for web search queries), there is a number of requests available free of charge every day.  
 
 ## How to use
 
@@ -58,7 +59,7 @@ The agent can handle CVEs from various ecosystems:
 
 ```bash
 uv venv --python 3.12
-source .venv/bin/activate  # On Windows: venv\Scripts\activate
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 uv pip install -r requirements.txt
 ```
 
@@ -71,7 +72,7 @@ export GOOGLE_CSE_ID="<your Google CSE ID>"        # you can find it at https://
 export GOOGLE_API_KEY="<your Google API key>"      # Google Cloud API Key for your project
 ```
  
-** Without these variables the agent won't work correctly!**
+**Without these variables the agent won't work correctly!**
 
 Optional overrides:
 
@@ -106,7 +107,7 @@ vllm serve openai/gpt-oss-20b \
 4. Run the agent and request a patch for a vulnerability with CVE identifier:
 
 ```bash
-python agent.py CVE-2025-0762 --debug
+python agent_runner.py CVE-2025-0762 --debug
 ```
 
 - `--steps` controls the maximum number of LLM/tool interaction rounds (defaults to 60).
