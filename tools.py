@@ -9,24 +9,14 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup, FeatureNotFound
 
-try:
-    from .config import (
-        FETCH_TEXT_CAP,
-        GOOGLE_API_KEY,
-        GOOGLE_CSE_ID,
-        HTTP_PROXIES,
-        REQUEST_TIMEOUT,
-        UA,
-    )
-except ImportError:  # pragma: no cover - script execution fallback
-    from config import (
-        FETCH_TEXT_CAP,
-        GOOGLE_API_KEY,
-        GOOGLE_CSE_ID,
-        HTTP_PROXIES,
-        REQUEST_TIMEOUT,
-        UA,
-    )
+from config import (
+    FETCH_TEXT_CAP,
+    GOOGLE_API_KEY,
+    GOOGLE_CSE_ID,
+    HTTP_PROXIES,
+    REQUEST_TIMEOUT,
+    UA,
+)
 
 COMMIT_PATTERNS = [
     re.compile(r"https?://github\.com/([^/]+)/([^/]+)/commit/([0-9a-f]{40})"),

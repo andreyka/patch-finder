@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
 from openai import OpenAI
 
@@ -38,6 +38,52 @@ from tools import (
     tool_fetch_url,
     tool_web_search,
 )
+
+
+# Message role constants
+MESSAGE_ROLE_TOOL = "tool"
+MESSAGE_ROLE_USER = "user"
+MESSAGE_ROLE_ASSISTANT = "assistant"
+MESSAGE_ROLE_SYSTEM = "system"
+
+# Context fallback constants
+MINIMAL_CONTEXT_BASE_MESSAGES = 2
+MINIMAL_CONTEXT_TOOL_MESSAGES = 10
+MINIMAL_CONTEXT_MAX_TOKENS = 512
+
+# Authority source patterns for verification
+AUTHORITY_SOURCES = [
+    "nvd.nist.gov/vuln/detail",
+    "osv.dev",
+    "api.osv.dev",
+    "github.com/advisories",
+    "issues.chromium.org",
+    "crbug.com",
+    "bugs.chromium.org",
+]
+
+GITHUB_SECURITY_ADVISORY_MARKERS = ("github.com/", "/security/advisories/")
+
+
+class CommitSuccessResponse(TypedDict):
+    """Successful commit identification response."""
+    cve_id: str
+    date: str
+    description: str
+    commit_hash: str
+
+
+class CommitErrorResponse(TypedDict):
+    """Error response when commit cannot be identified."""
+    cve_id: str
+    date: Literal["YYYY-MM-DD"]
+    description: str
+    commit_hash: Literal["None"]
+    error: str
+    reason: str
+
+
+CommitResponse = Union[CommitSuccessResponse, CommitErrorResponse]
 
 
 class PatchFinderAgent:
@@ -140,6 +186,25 @@ class PatchFinderAgent:
             f"{m.get('name')}:{(m.get('content') or '')[:64]}" for m in last
         )
     
+    def _is_authority_source(self, content: str) -> bool:
+        """Check if content contains an authority source URL.
+        
+        Authority sources are official security databases and bug trackers
+        that provide reliable information about vulnerabilities.
+        
+        Args:
+            content: The content to check for authority source URLs.
+            
+        Returns:
+            True if an authority source is found, False otherwise.
+        """
+        # Check for GitHub Security Advisory (requires both markers)
+        if all(marker in content for marker in GITHUB_SECURITY_ADVISORY_MARKERS):
+            return True
+        
+        # Check for other authority sources
+        return any(source in content for source in AUTHORITY_SOURCES)
+    
     def _add_tool_message(self, name: str, tool_call_id: str, content: str) -> None:
         """Add a tool response message and update tracking state.
         
@@ -149,17 +214,7 @@ class PatchFinderAgent:
             content: The content returned by the tool.
         """
         # Check if we've hit an authority source
-        if (
-            "nvd.nist.gov/vuln/detail" in content
-            or ("github.com/" in content and 
-                "/security/advisories/" in content)
-            or "osv.dev" in content
-            or "api.osv.dev" in content
-            or "github.com/advisories" in content
-            or "issues.chromium.org" in content
-            or "crbug.com" in content
-            or "bugs.chromium.org" in content
-        ):
+        if self._is_authority_source(content):
             self.have_authority = True
             
         # Track commit URLs
@@ -169,7 +224,7 @@ class PatchFinderAgent:
                     self.seen_commit_urls[url] = self.seen_commit_urls.get(url, 0) + 1
                     
         self.messages.append({
-            "role": "tool",
+            "role": MESSAGE_ROLE_TOOL,
             "tool_call_id": tool_call_id,
             "name": name,
             "content": content
@@ -194,7 +249,7 @@ class PatchFinderAgent:
                             )
                 if expanded_payloads:
                     self.messages.append({
-                        "role": "user",
+                        "role": MESSAGE_ROLE_USER,
                         "content": (
                             "AUTO-EXPANDED COMMIT PAGES:\n\n" +
                             "\n\n".join(expanded_payloads)
@@ -323,7 +378,7 @@ class PatchFinderAgent:
         )
         if have_full_sha and self.have_authority:
             self.messages.append({
-                "role": "user",
+                "role": MESSAGE_ROLE_USER,
                 "content": (
                     "You have seen commit URLs and authority sources. "
                     "CRITICAL: Verify the commit is the FIX, not the last affected/vulnerable commit. "
@@ -349,7 +404,7 @@ class PatchFinderAgent:
         self.guard.note(signature)
         if self.debug:
             # Show more readable progress info
-            last_tools = [m for m in self.messages if m.get("role") == "tool"][-3:]
+            last_tools = [m for m in self.messages if m.get("role") == MESSAGE_ROLE_TOOL][-3:]
             tool_summary = []
             for m in last_tools:
                 name = m.get('name', 'unknown')
@@ -364,19 +419,19 @@ class PatchFinderAgent:
         if self.guard.should_finalize():
             self.messages.append(
                 {
-                    "role": "user",
+                    "role": MESSAGE_ROLE_USER,
                     "content": "Stop calling tools. Use existing evidence and output STRICT JSON now.",
                 }
             )
     
-    def _create_error_response(self, reason: str) -> Dict[str, Any]:
+    def _create_error_response(self, reason: str) -> CommitErrorResponse:
         """Create an error response dictionary.
         
         Args:
             reason: The reason for the error.
             
         Returns:
-            A dictionary containing error information.
+            A CommitErrorResponse dictionary with error information.
         """
         return {
             "cve_id": self.cve_id,
@@ -387,12 +442,60 @@ class PatchFinderAgent:
             "reason": reason,
         }
     
-    def run(self) -> Dict[str, Any]:
+    def _build_minimal_messages(self) -> List[Dict[str, Any]]:
+        """Build minimal message context with base messages and recent tool responses.
+        
+        This is used as a fallback when the full context is too large.
+        
+        Returns:
+            A minimal list of messages for context reduction.
+        """
+        return (
+            self.messages[:MINIMAL_CONTEXT_BASE_MESSAGES] +
+            [m for m in self.messages[MINIMAL_CONTEXT_BASE_MESSAGES:] 
+             if m.get("role") == MESSAGE_ROLE_TOOL][-MINIMAL_CONTEXT_TOOL_MESSAGES:]
+        )
+    
+    def _call_chat_with_fallback(
+        self,
+        prompt_messages: List[Dict[str, Any]],
+        max_tokens: int
+    ) -> Any:
+        """Call chat API with automatic fallback to minimal context on error.
+        
+        Args:
+            prompt_messages: The messages to send to the API.
+            max_tokens: Maximum tokens for completion.
+            
+        Returns:
+            The chat completion response.
+            
+        Raises:
+            Exception: If even the minimal context call fails.
+        """
+        try:
+            return self._call_chat(prompt_messages, TOOLS, max_tokens)
+        except Exception as exc:
+            if self.debug:
+                print(f"[chat error] {exc} - trying with minimal context")
+            
+            # Try with minimal context as fallback
+            minimal_messages = self._build_minimal_messages()
+            prompt_messages, available_tokens = build_prompt_that_fits(
+                minimal_messages, debug=self.debug
+            )
+            return self._call_chat(
+                prompt_messages,
+                TOOLS,
+                min(MINIMAL_CONTEXT_MAX_TOKENS, available_tokens)
+            )
+    
+    def run(self) -> CommitResponse:
         """Run the agent to find the fix commit for a CVE.
         
         Returns:
-            A dictionary containing the CVE information and fix commit,
-            or an error structure if the fix cannot be found.
+            A CommitResponse (either success or error) containing the CVE 
+            information and fix commit, or error details if not found.
         """
         self._initialize_messages()
 
@@ -407,30 +510,14 @@ class PatchFinderAgent:
             )
             max_tokens = max(1, available_tokens)
 
-            try: 
-                response = self._call_chat(prompt_messages, TOOLS, max_tokens)
-            except Exception as exc:
+            try:
+                response = self._call_chat_with_fallback(prompt_messages, max_tokens)
+            except Exception as hard_exc:
                 if self.debug:
-                    print(f"[chat error] {exc}")
-                minimal = (
-                    self.messages[:2] +
-                    [m for m in self.messages[2:] if m.get("role") == "tool"][-10:]
+                    print(f"[chat hard fail] {hard_exc}")
+                return self._create_error_response(
+                    "Model/server refused due to context limits"
                 )
-                prompt_messages, available_tokens = build_prompt_that_fits(
-                    minimal, debug=self.debug
-                )
-                try:
-                    response = self._call_chat(
-                        prompt_messages,
-                        TOOLS,
-                        min(512, available_tokens)
-                    )
-                except Exception as hard_exc:
-                    if self.debug:
-                        print(f"[chat hard fail] {hard_exc}")
-                    return self._create_error_response(
-                        "Model/server refused due to context limits"
-                    )
 
             message = response.choices[0].message
 
@@ -444,9 +531,9 @@ class PatchFinderAgent:
             try:
                 return json.loads(content)
             except Exception:
-                self.messages.append({"role": "assistant", "content": content[:2000]})
+                self.messages.append({"role": MESSAGE_ROLE_ASSISTANT, "content": content[:2000]})
                 self.messages.append({
-                    "role": "user",
+                    "role": MESSAGE_ROLE_USER,
                     "content": "Respond now as STRICT JSON only. Do not call tools."
                 })
                 continue
@@ -462,7 +549,7 @@ def run_agent(
     base_url: Optional[str],
     steps: int,
     debug: bool
-) -> Dict[str, Any]:
+) -> CommitResponse:
     """Run the agent to find the fix commit for a CVE.
     
     This is a convenience function that creates a PatchFinderAgent instance
@@ -476,12 +563,12 @@ def run_agent(
         debug: Whether to print debug information.
         
     Returns:
-        A dictionary containing the CVE information and fix commit,
-        or an error structure if the fix cannot be found.
+        A CommitResponse (either success or error) containing the CVE
+        information and fix commit, or error details if not found.
     """
     agent = PatchFinderAgent(cve_id, model, base_url, steps, debug)
     return agent.run()
 
 
-__all__ = ["run_agent", "PatchFinderAgent"]
+__all__ = ["run_agent", "PatchFinderAgent", "CommitResponse", "CommitSuccessResponse", "CommitErrorResponse"]
 

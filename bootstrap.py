@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Set, Tuple
 
-try:
-    from .config import BOOTSTRAP_SECTION_TOK_CAP, COMMIT_EXPAND_LIMIT
-    from .tools import extract_commit_links, tool_fetch_url, tool_web_search
-    from .tokenizer import truncate_to_token_cap
-except ImportError:  # pragma: no cover - script execution fallback
-    from config import BOOTSTRAP_SECTION_TOK_CAP, COMMIT_EXPAND_LIMIT
-    from tools import extract_commit_links, tool_fetch_url, tool_web_search
-    from tokenizer import truncate_to_token_cap
+from config import BOOTSTRAP_SECTION_TOK_CAP, COMMIT_EXPAND_LIMIT
+from tools import extract_commit_links, tool_fetch_url, tool_web_search
+from tokenizer import truncate_to_token_cap
+
+
+# Constants for bootstrap configuration
+MAX_CHROMIUM_BUGS_TO_FETCH = 3
 
 
 class EvidenceBootstrap:
@@ -25,7 +23,7 @@ class EvidenceBootstrap:
             debug: Whether to print debug information.
         """
         self.debug = debug
-        self.sections: List[str] = []
+        self.sections: list[str] = []
     
     def _add_section(self, title: str, body: str) -> None:
         """Add a section to the evidence collection.
@@ -37,7 +35,7 @@ class EvidenceBootstrap:
         trimmed = truncate_to_token_cap(body, BOOTSTRAP_SECTION_TOK_CAP)
         self.sections.append(f"### {title}\n{trimmed}\n")
     
-    def _fetch_primary_sources(self, cve_id: str) -> Tuple[str, str]:
+    def _fetch_primary_sources(self, cve_id: str) -> tuple[str, str]:
         """Fetch NVD and CVE.org content.
         
         Args:
@@ -56,7 +54,7 @@ class EvidenceBootstrap:
         )
         return nvd_content, cve_content
     
-    def _extract_chromium_bugs(self, content: str) -> Set[str]:
+    def _extract_chromium_bugs(self, content: str) -> set[str]:
         """Extract Chromium bug IDs from content.
         
         Args:
@@ -65,7 +63,7 @@ class EvidenceBootstrap:
         Returns:
             A set of Chromium bug IDs found.
         """
-        chromium_bug_ids: Set[str] = set()
+        chromium_bug_ids: set[str] = set()
         
         # Extract bug IDs from various formats
         patterns = [
@@ -83,7 +81,7 @@ class EvidenceBootstrap:
         
         return chromium_bug_ids
     
-    def _fetch_ghsa_advisory(self, cve_id: str) -> Optional[str]:
+    def _fetch_ghsa_advisory(self, cve_id: str) -> str | None:
         """Search and fetch GHSA advisory if available.
         
         Args:
@@ -107,7 +105,7 @@ class EvidenceBootstrap:
         
         return None
     
-    def _fetch_chromium_commits(self, bug_ids: Set[str]) -> None:
+    def _fetch_chromium_commits(self, bug_ids: set[str]) -> None:
         """Fetch Chromium commit information for bug IDs.
         
         Args:
@@ -130,9 +128,9 @@ class EvidenceBootstrap:
     def _build_url_list(
         self,
         cve_id: str,
-        chromium_bug_ids: Set[str],
-        ghsa_link: Optional[str]
-    ) -> List[Tuple[str, str]]:
+        chromium_bug_ids: set[str],
+        ghsa_link: str | None
+    ) -> list[tuple[str, str]]:
         """Build the list of URLs to fetch.
         
         Args:
@@ -153,7 +151,7 @@ class EvidenceBootstrap:
         
         # Add Chromium bug URLs at the beginning if found
         if chromium_bug_ids:
-            for bug_id in sorted(chromium_bug_ids)[:3]:
+            for bug_id in sorted(chromium_bug_ids)[:MAX_CHROMIUM_BUGS_TO_FETCH]:
                 bug_url = f"https://issues.chromium.org/issues/{bug_id}"
                 urls.insert(0, (f"Chromium bug {bug_id}", bug_url))
         
@@ -173,7 +171,7 @@ class EvidenceBootstrap:
         if not commit_urls:
             return
         
-        expanded: List[str] = []
+        expanded: list[str] = []
         for commit_url in commit_urls:
             expanded.append(tool_fetch_url(commit_url, debug=self.debug))
         
