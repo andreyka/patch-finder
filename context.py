@@ -16,6 +16,28 @@ from tokenizer import (
 )
 
 
+def _truncate_tool_messages(tool_messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Truncate large tool message content to stay within token limits.
+    
+    Args:
+        tool_messages: List of tool message dictionaries.
+        
+    Returns:
+        List of tool messages with large content truncated to TOOL_TRUNC_TOK.
+    """
+    compact_tools: list[dict[str, str]] = []
+    for message in tool_messages:
+        content = message.get("content") or ""
+        if token_count(content) > TOOL_TRUNC_TOK:
+            truncated = truncate_to_token_cap(content, TOOL_TRUNC_TOK)
+            new_message = dict(message)
+            new_message["content"] = truncated
+            compact_tools.append(new_message)
+        else:
+            compact_tools.append(message)
+    return compact_tools
+
+
 def build_prompt_that_fits(
     messages: list[dict[str, str]],
     debug: bool = False
@@ -47,16 +69,7 @@ def build_prompt_that_fits(
     tool_messages = tool_messages[-MAX_TOOL_MSGS:]
     
     # Truncate large tool message content
-    compact_tools: list[dict[str, str]] = []
-    for message in tool_messages:
-        content = message.get("content") or ""
-        if token_count(content) > TOOL_TRUNC_TOK:
-            truncated = truncate_to_token_cap(content, TOOL_TRUNC_TOK)
-            new_message = dict(message)
-            new_message["content"] = truncated
-            compact_tools.append(new_message)
-        else:
-            compact_tools.append(message)
+    compact_tools = _truncate_tool_messages(tool_messages)
 
     # Iteratively drop messages until we fit within token budget
     while True:
