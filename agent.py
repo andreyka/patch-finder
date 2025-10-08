@@ -411,7 +411,7 @@ class PatchFinderAgent:
                 content = (m.get('content') or '')[:64]
                 # Highlight errors in red-ish way
                 if content.startswith("ERROR:"):
-                    tool_summary.append(f"{name}:❌{content}")
+                    tool_summary.append(f"{name}:✗{content}")
                 else:
                     tool_summary.append(f"{name}:✓")
             print(f"[progress] recent_tools=[{', '.join(tool_summary)}] stalls={self.guard.stalls}")
