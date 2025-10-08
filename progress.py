@@ -1,4 +1,4 @@
-"""Progress tracking utilities."""
+"""Agent progress tracking logic."""
 
 from __future__ import annotations
 

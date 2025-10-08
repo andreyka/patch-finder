@@ -1,4 +1,4 @@
-"""Prompt templates for the CVE patch finder agent.
+"""Prompt templates for the patch finder agent.
 
 This module contains the system prompt template that instructs the LLM
 on how to search for and verify CVE fix commits.

@@ -1,4 +1,4 @@
-"""Main loop for the new agent implementation."""
+"""Patch finder AI agent workflow implementation."""
 
 from __future__ import annotations
 

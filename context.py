@@ -1,4 +1,4 @@
-"""Prompt compaction logic for the new agent."""
+"""Prompt management logic for the new agent."""
 
 from __future__ import annotations
 

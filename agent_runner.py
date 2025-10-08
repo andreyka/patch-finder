@@ -1,4 +1,4 @@
-"""Command-line interface for the patch finder agent."""
+"""Command-line tool for the patch finder agent."""
 
 from __future__ import annotations
 

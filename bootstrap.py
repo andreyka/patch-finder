@@ -1,4 +1,4 @@
-"""Bootstrap evidence assembly for the new agent."""
+"""Bootstrap evidence logic for the new agent."""
 
 from __future__ import annotations
 

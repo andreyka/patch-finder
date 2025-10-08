@@ -1,4 +1,4 @@
-"""Tool implementations and HTML helpers for the new agent."""
+"""Tool implementations and HTML helpers for the patch finder agent."""
 
 from __future__ import annotations
 
