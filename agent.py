@@ -39,55 +39,421 @@ from tools import (
     tool_web_search,
 )
 
-def _client(base_url: Optional[str]) -> OpenAI:
-    """Create an OpenAI client with the specified base URL.
-    
-    Args:
-        base_url: The base URL for the OpenAI API, or None for default.
-        
-    Returns:
-        An initialized OpenAI client instance.
-    """
-    return OpenAI(
-        base_url=base_url or DEFAULT_BASE_URL,
-        api_key=os.environ.get("OPENAI_API_KEY", "sk-local")
-    )
 
-
-def _call_chat(
-    client: OpenAI,
-    model: str,
-    messages: List[Dict[str, Any]],
-    tools: List[Dict[str, Any]],
-    max_tokens: int,
-    debug: bool,
-) -> Any:
-    """Call the chat completion API with the given parameters.
+class PatchFinderAgent:
+    """Agent class for finding fix commits for CVEs."""
     
-    Args:
-        client: The OpenAI client instance.
-        model: The model name to use.
-        messages: List of message dictionaries.
-        tools: List of available tools.
-        max_tokens: Maximum tokens for completion.
-        debug: Whether to print debug information.
+    def __init__(
+        self,
+        cve_id: str,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None,
+        steps: int = 60,
+        debug: bool = False,
+    ):
+        """Initialize the CVE Agent.
         
-    Returns:
-        The chat completion response.
-    """
-    mt = max(1, int(max_tokens))
-    if debug:
-        token_sum = messages_token_sum(messages)
-        print(f"[chat] send: prompt_tokens={token_sum}, max_tokens={mt}")
-    return client.chat.completions.create(
-        model=model,
-        messages=messages,
-        tools=tools,
-        tool_choice="auto",
-        temperature=0,
-        top_p=1,
-        max_tokens=mt,
-    )
+        Args:
+            cve_id: The CVE identifier (e.g., 'CVE-2025-0762').
+            model: The model name to use, or None for default.
+            base_url: The API base URL, or None for default.
+            steps: Maximum number of interaction rounds.
+            debug: Whether to print debug information.
+        """
+        self.cve_id = cve_id
+        self.model_name = model or DEFAULT_MODEL
+        self.base_url = base_url or DEFAULT_BASE_URL
+        self.steps = steps
+        self.debug = debug
+        
+        # Initialize OpenAI client
+        self.client = OpenAI(
+            base_url=self.base_url,
+            api_key=os.environ.get("OPENAI_API_KEY", "sk-local")
+        )
+        
+        # Initialize state
+        self.messages: List[Dict[str, Any]] = []
+        self.search_cache: Dict[str, str] = {}
+        self.fetch_cache: Dict[str, str] = {}
+        self.seen_commit_urls: Dict[str, int] = {}
+        self.have_authority = False
+        self.guard = ProgressGuard(NO_PROGRESS_WINDOW, NO_PROGRESS_PATIENCE)
+        
+    def _call_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        max_tokens: int,
+    ) -> Any:
+        """Call the chat completion API with the given parameters.
+        
+        Args:
+            messages: List of message dictionaries.
+            tools: List of available tools.
+            max_tokens: Maximum tokens for completion.
+            
+        Returns:
+            The chat completion response.
+        """
+        mt = max(1, int(max_tokens))
+        if self.debug:
+            token_sum = messages_token_sum(messages)
+            print(f"[chat] send: prompt_tokens={token_sum}, max_tokens={mt}")
+        return self.client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=0,
+            top_p=1,
+            max_tokens=mt,
+        )
+    
+    def _initialize_messages(self) -> None:
+        """Initialize the message list with system and user prompts."""
+        system_prompt = SYSTEM_PROMPT_TEMPLATE.replace("<<CVE_ID>>", self.cve_id)
+        if self.debug:
+            print("=== System Prompt ===")
+            print(system_prompt)
+            print("=====================\n")
+
+        self.messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Find the official upstream fix commit for {self.cve_id}."},
+        ]
+
+        if BOOTSTRAP:
+            if self.debug:
+                print("[bootstrap] prefetching key sources...")
+            boot = bootstrap_evidence(self.cve_id, debug=self.debug)
+            self.messages.append({"role": "user", "content": boot})
+    
+    def _tool_signature(self) -> str:
+        """Generate a signature from recent tool messages.
+        
+        Returns:
+            A string signature based on the last 3 tool messages.
+        """
+        last = [m for m in self.messages if m.get("role") == "tool"][-3:]
+        return "|".join(
+            f"{m.get('name')}:{(m.get('content') or '')[:64]}" for m in last
+        )
+    
+    def _add_tool_message(self, name: str, tool_call_id: str, content: str) -> None:
+        """Add a tool response message and update tracking state.
+        
+        Args:
+            name: The name of the tool that was called.
+            tool_call_id: The unique identifier for this tool call.
+            content: The content returned by the tool.
+        """
+        # Check if we've hit an authority source
+        if (
+            "nvd.nist.gov/vuln/detail" in content
+            or ("github.com/" in content and 
+                "/security/advisories/" in content)
+            or "osv.dev" in content
+            or "api.osv.dev" in content
+            or "github.com/advisories" in content
+            or "issues.chromium.org" in content
+            or "crbug.com" in content
+            or "bugs.chromium.org" in content
+        ):
+            self.have_authority = True
+            
+        # Track commit URLs
+        for url in re.findall(r"https?://[^\s)]+", content):
+            for pattern in COMMIT_PATTERNS:
+                if pattern.search(url):
+                    self.seen_commit_urls[url] = self.seen_commit_urls.get(url, 0) + 1
+                    
+        self.messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "name": name,
+            "content": content
+        })
+
+        # Auto-expand commits if enabled
+        if AUTO_EXPAND_COMMITS:
+            new_commits = [
+                u for u in extract_commit_links(content)
+                if u not in self.fetch_cache
+            ]
+            if new_commits:
+                expanded_payloads: List[str] = []
+                for commit_url in new_commits[:COMMIT_EXPAND_LIMIT]:
+                    expanded = tool_fetch_url(commit_url, debug=self.debug)
+                    self.fetch_cache[commit_url] = expanded
+                    expanded_payloads.append(expanded)
+                    for pattern in COMMIT_PATTERNS:
+                        if pattern.search(commit_url):
+                            self.seen_commit_urls[commit_url] = (
+                                self.seen_commit_urls.get(commit_url, 0) + 1
+                            )
+                if expanded_payloads:
+                    self.messages.append({
+                        "role": "user",
+                        "content": (
+                            "AUTO-EXPANDED COMMIT PAGES:\n\n" +
+                            "\n\n".join(expanded_payloads)
+                        ),
+                    })
+    
+    def _parse_tool_arguments(self, tool_call: Any) -> Dict[str, Any]:
+        """Parse and repair tool call arguments.
+        
+        Args:
+            tool_call: The tool call object from the API response.
+            
+        Returns:
+            Parsed arguments dictionary, or empty dict if parsing fails.
+        """
+        name = tool_call.function.name
+        try:
+            return json.loads(tool_call.function.arguments or "{}")
+        except Exception as e:
+            # Try to repair common JSON errors (trailing commas, etc)
+            raw_args = tool_call.function.arguments or "{}"
+            try:
+                # Remove trailing commas before closing braces/brackets
+                repaired = re.sub(r',\s*}', '}', raw_args)
+                repaired = re.sub(r',\s*]', ']', repaired)
+                # Remove empty string keys like ,"" or ,""} 
+                repaired = re.sub(r',\s*""\s*}', '}', repaired)
+                repaired = re.sub(r',\s*""\s*]', ']', repaired)
+                args = json.loads(repaired)
+                if self.debug:
+                    print(f"[tool_call_repair] Successfully repaired JSON for {name}")
+                    print(f"[tool_call_repair] Original: {raw_args!r}")
+                    print(f"[tool_call_repair] Repaired: {repaired!r}")
+                return args
+            except Exception:
+                if self.debug:
+                    print(f"[tool_call_error] Failed to parse arguments for {name}: {e}")
+                    print(f"[tool_call_error] Raw arguments: {raw_args!r}")
+                    print(f"[tool_call_error] Repair attempt also failed")
+                return {}
+    
+    def _handle_web_search(self, tool_call: Any, args: Dict[str, Any]) -> None:
+        """Handle a web_search tool call.
+        
+        Args:
+            tool_call: The tool call object from the API response.
+            args: Parsed arguments dictionary.
+        """
+        query = (args.get("query") or "").strip()
+        if not query:
+            output = "ERROR: empty query."
+            if self.debug:
+                print(f"[tool_call_error] web_search called with empty query")
+                print(f"[tool_call_error] Parsed args: {args}")
+                print(f"[tool_call_error] Raw arguments: {tool_call.function.arguments!r}")
+        else:
+            output = self.search_cache.get(query)
+            if output is None:
+                output = tool_web_search(query, debug=self.debug)
+                self.search_cache[query] = output
+        self._add_tool_message("web_search", tool_call.id, output)
+    
+    def _handle_fetch_url(self, tool_call: Any, args: Dict[str, Any]) -> None:
+        """Handle a fetch_url tool call.
+        
+        Args:
+            tool_call: The tool call object from the API response.
+            args: Parsed arguments dictionary.
+        """
+        url = (args.get("url") or "").strip()
+        if not url:
+            output = "ERROR: empty url."
+            if self.debug:
+                print(f"[tool_call_error] fetch_url called with empty url")
+                print(f"[tool_call_error] Parsed args: {args}")
+                print(f"[tool_call_error] Raw arguments: {tool_call.function.arguments!r}")
+        else:
+            cached = self.fetch_cache.get(url)
+            if cached and not cached.startswith("ERROR:"):
+                output = f"NOTE: URL {url} already fetched. Use existing info."
+            else:
+                output = tool_fetch_url(url, debug=self.debug)
+                self.fetch_cache[url] = output
+        self._add_tool_message("fetch_url", tool_call.id, output)
+    
+    def _handle_unknown_tool(self, tool_call: Any) -> None:
+        """Handle an unknown tool call.
+        
+        Args:
+            tool_call: The tool call object from the API response.
+        """
+        name = tool_call.function.name
+        output = f"ERROR: unknown tool {name}"
+        if self.debug:
+            print(f"[tool_call_error] Unknown tool: {name}")
+            print(f"[tool_call_error] Raw arguments: {tool_call.function.arguments!r}")
+        self._add_tool_message(name, tool_call.id, output)
+    
+    def _handle_tool_call(self, tool_call: Any) -> None:
+        """Handle a single tool call.
+        
+        Args:
+            tool_call: The tool call object from the API response.
+        """
+        name = tool_call.function.name
+        args = self._parse_tool_arguments(tool_call)
+
+        if name == "web_search":
+            self._handle_web_search(tool_call, args)
+        elif name == "fetch_url":
+            self._handle_fetch_url(tool_call, args)
+        else:
+            self._handle_unknown_tool(tool_call)
+
+        time.sleep(TOOL_CALL_DELAY_SEC)
+    
+    def _check_finalization_condition(self) -> bool:
+        """Check if we should add a finalization message.
+        
+        Returns:
+            True if finalization message was added, False otherwise.
+        """
+        have_full_sha = any(
+            re.search(r"/commit/([0-9a-f]{40})(?:\b|$)", url)
+            for url in self.seen_commit_urls
+        )
+        if have_full_sha and self.have_authority:
+            self.messages.append({
+                "role": "user",
+                "content": (
+                    "You have seen commit URLs and authority sources. "
+                    "CRITICAL: Verify the commit is the FIX, not the last affected/vulnerable commit. "
+                    "Check commit message for 'fix', 'patch', 'CVE-XXXX', or security terms. "
+                    "Verify the diff removes vulnerable code. "
+                    "If this is the last affected commit (vulnerable), search for the NEXT commit that fixes it. "
+                    "Once verified, output the STRICT JSON with all required fields."
+                ),
+            })
+            return True
+        return False
+    
+    def _handle_tool_calls(self, message: Any) -> None:
+        """Handle all tool calls in a message.
+        
+        Args:
+            message: The message object containing tool calls.
+        """
+        for tool_call in message.tool_calls:
+            self._handle_tool_call(tool_call)
+
+        signature = self._tool_signature()
+        self.guard.note(signature)
+        if self.debug:
+            # Show more readable progress info
+            last_tools = [m for m in self.messages if m.get("role") == "tool"][-3:]
+            tool_summary = []
+            for m in last_tools:
+                name = m.get('name', 'unknown')
+                content = (m.get('content') or '')[:64]
+                # Highlight errors in red-ish way
+                if content.startswith("ERROR:"):
+                    tool_summary.append(f"{name}:❌{content}")
+                else:
+                    tool_summary.append(f"{name}:✓")
+            print(f"[progress] recent_tools=[{', '.join(tool_summary)}] stalls={self.guard.stalls}")
+            print(f"[progress] signature='{signature[:120]}'")
+        if self.guard.should_finalize():
+            self.messages.append(
+                {
+                    "role": "user",
+                    "content": "Stop calling tools. Use existing evidence and output STRICT JSON now.",
+                }
+            )
+    
+    def _create_error_response(self, reason: str) -> Dict[str, Any]:
+        """Create an error response dictionary.
+        
+        Args:
+            reason: The reason for the error.
+            
+        Returns:
+            A dictionary containing error information.
+        """
+        return {
+            "cve_id": self.cve_id,
+            "date": "YYYY-MM-DD",
+            "description": "No description available.",
+            "commit_hash": "None",
+            "error": "Unable to find official fix commit",
+            "reason": reason,
+        }
+    
+    def run(self) -> Dict[str, Any]:
+        """Run the agent to find the fix commit for a CVE.
+        
+        Returns:
+            A dictionary containing the CVE information and fix commit,
+            or an error structure if the fix cannot be found.
+        """
+        self._initialize_messages()
+
+        for step in range(1, max(1, self.steps) + 1):
+            if self.debug:
+                print(f"[step {step}] chat | model={self.model_name}")
+
+            self._check_finalization_condition()
+
+            prompt_messages, available_tokens = build_prompt_that_fits(
+                self.messages, debug=self.debug
+            )
+            max_tokens = max(1, available_tokens)
+
+            try: 
+                response = self._call_chat(prompt_messages, TOOLS, max_tokens)
+            except Exception as exc:
+                if self.debug:
+                    print(f"[chat error] {exc}")
+                minimal = (
+                    self.messages[:2] +
+                    [m for m in self.messages[2:] if m.get("role") == "tool"][-10:]
+                )
+                prompt_messages, available_tokens = build_prompt_that_fits(
+                    minimal, debug=self.debug
+                )
+                try:
+                    response = self._call_chat(
+                        prompt_messages,
+                        TOOLS,
+                        min(512, available_tokens)
+                    )
+                except Exception as hard_exc:
+                    if self.debug:
+                        print(f"[chat hard fail] {hard_exc}")
+                    return self._create_error_response(
+                        "Model/server refused due to context limits"
+                    )
+
+            message = response.choices[0].message
+
+            if getattr(message, "tool_calls", None):
+                self._handle_tool_calls(message)
+                continue
+
+            content = message.content or ""
+            if self.debug:
+                print(f"[assistant] {content[:4000]}\n")
+            try:
+                return json.loads(content)
+            except Exception:
+                self.messages.append({"role": "assistant", "content": content[:2000]})
+                self.messages.append({
+                    "role": "user",
+                    "content": "Respond now as STRICT JSON only. Do not call tools."
+                })
+                continue
+
+        return self._create_error_response(
+            "Reached max steps without a valid JSON answer"
+        )
 
 
 def run_agent(
@@ -98,6 +464,9 @@ def run_agent(
     debug: bool
 ) -> Dict[str, Any]:
     """Run the agent to find the fix commit for a CVE.
+    
+    This is a convenience function that creates a PatchFinderAgent instance
+    and runs it.
     
     Args:
         cve_id: The CVE identifier (e.g., 'CVE-2025-0762').
@@ -110,260 +479,9 @@ def run_agent(
         A dictionary containing the CVE information and fix commit,
         or an error structure if the fix cannot be found.
     """
-    client = _client(base_url)
-    model_name = model or DEFAULT_MODEL
-
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.replace("<<CVE_ID>>", cve_id)
-    if debug:
-        print("=== System Prompt ===")
-        print(system_prompt)
-        print("=====================\n")
-
-    messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Find the official upstream fix commit for {cve_id}."},
-    ]
-
-    if BOOTSTRAP:
-        if debug:
-            print("[bootstrap] prefetching key sources...")
-        boot = bootstrap_evidence(cve_id, debug=debug)
-        messages.append({"role": "user", "content": boot})
-
-    search_cache: Dict[str, str] = {}
-    fetch_cache: Dict[str, str] = {}
-    seen_commit_urls: Dict[str, int] = {}
-    have_authority = False
-    guard = ProgressGuard(NO_PROGRESS_WINDOW, NO_PROGRESS_PATIENCE)
-
-    def tool_signature() -> str:
-        """Generate a signature from recent tool messages.
-        
-        Returns:
-            A string signature based on the last 3 tool messages.
-        """
-        last = [m for m in messages if m.get("role") == "tool"][-3:]
-        return "|".join(
-            f"{m.get('name')}:{(m.get('content') or '')[:64]}" for m in last
-        )
-
-    def add_tool_message(name: str, tool_call_id: str, content: str) -> None:
-        """Add a tool response message and update tracking state.
-        
-        Args:
-            name: The name of the tool that was called.
-            tool_call_id: The unique identifier for this tool call.
-            content: The content returned by the tool.
-        """
-        nonlocal have_authority
-        if (
-            "nvd.nist.gov/vuln/detail" in content
-            or ("github.com/" in content and 
-                "/security/advisories/" in content)
-            or "osv.dev" in content
-            or "api.osv.dev" in content
-            or "github.com/advisories" in content
-            or "issues.chromium.org" in content
-            or "crbug.com" in content
-            or "bugs.chromium.org" in content
-        ):
-            have_authority = True
-        for url in re.findall(r"https?://[^\s)]+", content):
-            for pattern in COMMIT_PATTERNS:
-                if pattern.search(url):
-                    seen_commit_urls[url] = seen_commit_urls.get(url, 0) + 1
-        messages.append({
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "name": name,
-            "content": content
-        })
-
-        if AUTO_EXPAND_COMMITS:
-            new_commits = [
-                u for u in extract_commit_links(content)
-                if u not in fetch_cache
-            ]
-            if new_commits:
-                expanded_payloads: List[str] = []
-                for commit_url in new_commits[:COMMIT_EXPAND_LIMIT]:
-                    expanded = tool_fetch_url(commit_url, debug=debug)
-                    fetch_cache[commit_url] = expanded
-                    expanded_payloads.append(expanded)
-                    for pattern in COMMIT_PATTERNS:
-                        if pattern.search(commit_url):
-                            seen_commit_urls[commit_url] = (
-                                seen_commit_urls.get(commit_url, 0) + 1
-                            )
-                if expanded_payloads:
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "AUTO-EXPANDED COMMIT PAGES:\n\n" +
-                            "\n\n".join(expanded_payloads)
-                        ),
-                    })
-
-    for step in range(1, max(1, steps) + 1):
-        if debug:
-            print(f"[step {step}] chat | model={model_name}")
-
-        have_full_sha = any(
-            re.search(r"/commit/([0-9a-f]{40})(?:\b|$)", url)
-            for url in seen_commit_urls
-        )
-        if have_full_sha and have_authority:
-            messages.append({
-                "role": "user",
-                "content": (
-                    "You already have a full 40-char SHA commit URL and "
-                    "at least one authority (NVD/GHSA/OSV). "
-                    "Output the STRICT JSON now, with all required fields."
-                ),
-            })
-
-        prompt_messages, available_tokens = build_prompt_that_fits(messages, debug=debug)
-        max_tokens = max(1, available_tokens)
-
-        try:
-            response = _call_chat(
-                client, model_name, prompt_messages, TOOLS, max_tokens, debug
-            )
-        except Exception as exc:
-            if debug:
-                print(f"[chat error] {exc}")
-            minimal = (
-                messages[:2] +
-                [m for m in messages[2:] if m.get("role") == "tool"][-10:]
-            )
-            prompt_messages, available_tokens = build_prompt_that_fits(
-                minimal, debug=debug
-            )
-            try:
-                response = _call_chat(
-                    client,
-                    model_name,
-                    prompt_messages,
-                    TOOLS,
-                    min(512, available_tokens),
-                    debug
-                )
-            except Exception as hard_exc:
-                if debug:
-                    print(f"[chat hard fail] {hard_exc}")
-                return {
-                    "cve_id": cve_id,
-                    "date": "YYYY-MM-DD",
-                    "description": "No description available.",
-                    "commit_hash": "None",
-                    "error": "Unable to find official fix commit",
-                    "reason": "Model/server refused due to context limits",
-                }
-
-        message = response.choices[0].message
-
-        if getattr(message, "tool_calls", None):
-            for tool_call in message.tool_calls:
-                name = tool_call.function.name
-                try:
-                    args = json.loads(tool_call.function.arguments or "{}")
-                except Exception:
-                    args = {}
-
-                if name == "web_search":
-                    query = (args.get("query") or "").strip()
-                    if not query:
-                        output = "ERROR: empty query."
-                    else:
-                        output = search_cache.get(query)
-                        if output is None:
-                            output = tool_web_search(query, debug=debug)
-                            search_cache[query] = output
-                    add_tool_message("web_search", tool_call.id, output)
-
-                elif name == "fetch_url":
-                    url = (args.get("url") or "").strip()
-                    if not url:
-                        output = "ERROR: empty url."
-                    else:
-                        cached = fetch_cache.get(url)
-                        if cached and not cached.startswith("ERROR:"):
-                            output = f"NOTE: URL {url} already fetched. Use existing info."
-                        else:
-                            output = tool_fetch_url(url, debug=debug)
-                            fetch_cache[url] = output
-                    add_tool_message("fetch_url", tool_call.id, output)
-
-                else:
-                    add_tool_message(name, tool_call.id, f"ERROR: unknown tool {name}")
-
-                time.sleep(TOOL_CALL_DELAY_SEC)
-
-            signature = tool_signature()
-            guard.note(signature)
-            if debug:
-                print(f"[progress] sig='{signature[:96]}', stalls={guard.stalls}")
-            if guard.should_finalize():
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": "Stop calling tools. Use existing evidence and output STRICT JSON now.",
-                    }
-                )
-            continue
-
-        content = message.content or ""
-        if debug:
-            print(f"[assistant] {content[:4000]}\n")
-        try:
-            return json.loads(content)
-        except Exception:
-            messages.append({"role": "assistant", "content": content[:2000]})
-            messages.append({"role": "user", "content": "Respond now as STRICT JSON only. Do not call tools."})
-            continue
-
-    return {
-        "cve_id": cve_id,
-        "date": "YYYY-MM-DD",
-        "description": "No description available.",
-        "commit_hash": "None",
-        "error": "Unable to find official fix commit",
-        "reason": "Reached max steps without a valid JSON answer",
-    }
+    agent = PatchFinderAgent(cve_id, model, base_url, steps, debug)
+    return agent.run()
 
 
-__all__ = ["run_agent", "TOOLS", "build_arg_parser", "main"]
-
-def build_arg_parser() -> argparse.ArgumentParser:
-    """Build the command-line argument parser.
-    
-    Returns:
-        An ArgumentParser configured with all CLI options.
-    """
-    parser = argparse.ArgumentParser(
-        description=(
-            "Find the official upstream fix commit for a CVE "
-            "(128k context agent)."
-        )
-    )
-    parser.add_argument("cve_id")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--steps", type=int, default=60)
-    parser.add_argument("--debug", action="store_true")
-    return parser
-
-
-def main() -> None:
-    """Main entry point for the CLI."""
-    parser = build_arg_parser()
-    args = parser.parse_args()
-    result = run_agent(
-        args.cve_id, args.model, args.base_url, args.steps, args.debug
-    )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    main()
+__all__ = ["run_agent", "PatchFinderAgent"]
 

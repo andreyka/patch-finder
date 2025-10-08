@@ -52,25 +52,6 @@ The agent can handle CVEs from various ecosystems:
 - A local vLLM server hosting `openai/gpt-oss-20b` (requires at least RTX 4090 or more powerful GPU)
 - Google Cloud project with the Custom Search API enabled (for web search queries), there is a number of requests avalible free of charge every day.  
 
-## Environment variables
-
-Set the variables below before running the agent. Without these variables the agent won't work correctly! 
-
-```bash
-export OPENAI_API_KEY="local"                      # arbitrary value; vLLM ignores it but the SDK requires one
-export OPENAI_BASE_URL="http://localhost:8000/v1"  # matches the vLLM OpenAI-compatible endpoint
-export GOOGLE_CSE_ID="<your Google CSE ID>"        # you can find it at https://programmablesearchengine.google.com/controlpanel/all
-export GOOGLE_API_KEY="<your Google API key>"      # Google Cloud API Key for your project
-```
-
-Optional overrides:
-
-- `PATCH_FINDER_MODEL` (default `openai/gpt-oss-20b`)
-- `PATCH_FINDER_MAX_STEPS` (default `30`)
-- `PATCH_FINDER_MAX_TOKENS` (default `1024`)
-- `PATCH_FINDER_TOP_P` (default `1.0`)
-- `PATCH_FINDER_MAX_CONTEXT_CHARS` (default `48000`)
-
 ## How to use
 
 1. Create a new Python environment and install all needed dependencies:
@@ -81,7 +62,25 @@ source .venv/bin/activate  # On Windows: venv\Scripts\activate
 uv pip install -r requirements.txt
 ```
 
-2. Set the required environment variables (see [Environment variables](#environment-variables) section above).
+2. Set the required environment variables:
+
+```bash
+export OPENAI_API_KEY="local"                      # arbitrary value; vLLM ignores it but the SDK requires one
+export OPENAI_BASE_URL="http://localhost:8000/v1"  # matches the vLLM OpenAI-compatible endpoint
+export GOOGLE_CSE_ID="<your Google CSE ID>"        # you can find it at https://programmablesearchengine.google.com/controlpanel/all
+export GOOGLE_API_KEY="<your Google API key>"      # Google Cloud API Key for your project
+```
+ 
+** Without these variables the agent won't work correctly!**
+
+Optional overrides:
+
+- `PATCH_FINDER_MODEL` (default `openai/gpt-oss-20b`)
+- `PATCH_FINDER_MAX_STEPS` (default `60`)
+- `PATCH_FINDER_MAX_TOKENS` (default `1024`)
+- `PATCH_FINDER_TOP_P` (default `1.0`)
+- `PATCH_FINDER_MAX_CONTEXT_CHARS` (default `48000`)
+
 
 3. Launch vLLM with the OpenAI-compatible server so the agent can reach it through the standard OpenAI SDK. Example command (run in WSL or Linux shell):
 
