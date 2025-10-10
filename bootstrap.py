@@ -9,10 +9,6 @@ from tools import extract_commit_links, tool_fetch_url, tool_web_search
 from tokenizer import truncate_to_token_cap
 
 
-# Constants for bootstrap configuration
-MAX_CHROMIUM_BUGS_TO_FETCH = 3
-
-
 class EvidenceBootstrap:
     """Bootstrap evidence collection for CVE research."""
     
@@ -54,33 +50,6 @@ class EvidenceBootstrap:
         )
         return nvd_content, cve_content
     
-    def _extract_chromium_bugs(self, content: str) -> set[str]:
-        """Extract Chromium bug IDs from content.
-        
-        Args:
-            content: The content to search for bug IDs.
-            
-        Returns:
-            A set of Chromium bug IDs found.
-        """
-        chromium_bug_ids: set[str] = set()
-        
-        # Extract bug IDs from various formats
-        patterns = [
-            r"crbug\.com/(\d+)",
-            r"bugs\.chromium\.org/p/chromium/issues/detail\?id=(\d+)",
-            r"issues\.chromium\.org/issues/(\d+)",
-            r"Issue (\d{6,})",
-            r"Bug (\d{6,})",
-        ]
-        
-        for pattern in patterns:
-            for match in re.finditer(pattern, content, re.IGNORECASE):
-                bug_id = match.group(1)
-                chromium_bug_ids.add(bug_id)
-        
-        return chromium_bug_ids
-    
     def _fetch_ghsa_advisory(self, cve_id: str) -> str | None:
         """Search and fetch GHSA advisory if available.
         
@@ -105,37 +74,15 @@ class EvidenceBootstrap:
         
         return None
     
-    def _fetch_chromium_commits(self, bug_ids: set[str]) -> None:
-        """Fetch Chromium commit information for bug IDs.
-        
-        Args:
-            bug_ids: Set of Chromium bug IDs to search for.
-        """
-        if not bug_ids:
-            return
-        
-        if self.debug:
-            print(f"[bootstrap] Found Chromium bug IDs: {bug_ids}")
-        
-        # Search for commits related to the first bug ID
-        bug_id = sorted(bug_ids)[0]
-        chromium_commit_search = tool_web_search(
-            f'site:chromium.googlesource.com "{bug_id}" commit',
-            debug=self.debug
-        )
-        self._add_section("Chromium commit search", chromium_commit_search)
-    
     def _build_url_list(
         self,
         cve_id: str,
-        chromium_bug_ids: set[str],
         ghsa_link: str | None
     ) -> list[tuple[str, str]]:
         """Build the list of URLs to fetch.
         
         Args:
             cve_id: The CVE identifier.
-            chromium_bug_ids: Set of Chromium bug IDs found.
             ghsa_link: GHSA advisory URL if found.
             
         Returns:
@@ -148,12 +95,6 @@ class EvidenceBootstrap:
             (f"OSV page {cve_id}", f"https://osv.dev/vulnerability/{cve_id}"),
             (f"Debian {cve_id}", f"https://security-tracker.debian.org/tracker/{cve_id}"),
         ]
-        
-        # Add Chromium bug URLs at the beginning if found
-        if chromium_bug_ids:
-            for bug_id in sorted(chromium_bug_ids)[:MAX_CHROMIUM_BUGS_TO_FETCH]:
-                bug_url = f"https://issues.chromium.org/issues/{bug_id}"
-                urls.insert(0, (f"Chromium bug {bug_id}", bug_url))
         
         # Add GHSA advisory at the beginning if found
         if ghsa_link:
@@ -195,19 +136,11 @@ class EvidenceBootstrap:
         # Fetch primary sources to extract references
         nvd_content, cve_content = self._fetch_primary_sources(cve_id)
         
-        # Extract Chromium bug IDs if present
-        combined_content = nvd_content + " " + cve_content
-        chromium_bug_ids = self._extract_chromium_bugs(combined_content)
-        
         # Search for GHSA advisory
         ghsa_link = self._fetch_ghsa_advisory(cve_id)
         
-        # Search for Chromium commits if we found bug IDs
-        if chromium_bug_ids:
-            self._fetch_chromium_commits(chromium_bug_ids)
-        
         # Build and fetch all URLs
-        urls = self._build_url_list(cve_id, chromium_bug_ids, ghsa_link)
+        urls = self._build_url_list(cve_id, ghsa_link)
         for title, url in urls:
             fetched = tool_fetch_url(url, debug=self.debug)
             self._add_section(title, fetched)
