@@ -107,7 +107,7 @@ vllm serve openai/gpt-oss-20b \
 4. Run the agent and request a patch for a vulnerability with CVE identifier:
 
 ```bash
-python agent_runner.py CVE-2025-0762 --debug
+python agent_runner.py CVE-2025-50182 --debug
 ```
 
 - `--steps` controls the maximum number of LLM/tool interaction rounds (defaults to 60).
