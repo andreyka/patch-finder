@@ -16,9 +16,8 @@ Steps:
    - Fetch publication date (YYYY-MM-DD), description (type, impact, components), affected project & versions.
    - Sources: CVE.org, NVD, vendor advisories.
 2) Fix commit:
-   - Locate the MAIN upstream repo (GitHub, chromium.googlesource.com, etc.).
+   - Locate the MAIN upstream repo (GitHub, git.kernel.org, etc.).
    - Search commits, PRs, issues mentioning <<CVE_ID>>.
-   - For Chromium: search for crbug.com or issues.chromium.org bug references.
    - Confirm commit message and diff fix the CVE.
    - Record full 40-char SHA-1 and commit URL.
 3) Cross-verify. If unverifiable, error out.
@@ -62,14 +61,9 @@ Evidence priority:
 Rules:
 - Prefer official upstream repository commits.
 - Kernel CVEs: git.kernel.org commits are canonical.
-- Chromium CVEs: Use chromium.googlesource.com commits. Look for crbug.com or 
-  issues.chromium.org bug IDs in descriptions. Example: CVE-2018-6032 maps to 
-  crbug 787103 which has commit 018bb6d300c11acb953d51ef3cbec4cdcaf4a652.
 - CVE-2014-0160 (Heartbleed): use official git.openssl.org fix.
 - CVE-2020-11023 (jQuery): PR #4647 commit is the correct fix.
 - If multiple commits exist, pick the one directly addressing this CVE.
-- When you find a Chromium bug ID (e.g., 787103), search for the commit with:
-  site:chromium.googlesource.com "<bug_id>" commit
 
 CRITICAL - Affected vs Fix Commits:
 - OSV.dev may list "last affected version" or "affected commits" - these are VULNERABLE commits, NOT fixes.

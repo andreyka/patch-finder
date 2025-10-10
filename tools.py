@@ -25,9 +25,6 @@ COMMIT_PATTERNS = [
     re.compile(r"https?://github\.com/([^/]+)/([^/]+)/pull/\\d+/commits/([0-9a-f]{7,40})"),
     re.compile(r"https?://git\.kernel\.org/[^ ]*?/commit/\\?id=([0-9a-f]{7,40})"),
     re.compile(r"https?://git\.openssl\.org/[^ ]*?;a=commit;h=([0-9a-f]{7,40})"),
-    # Chromium/Gerrit commit patterns
-    re.compile(r"https?://chromium\.googlesource\.com/[^/]+/[^/]+/\+/([0-9a-f]{40})"),
-    re.compile(r"https?://chromium\.googlesource\.com/[^/]+/[^/]+/\+/([0-9a-f]{7,40})"),
     re.compile(r"https?://[^/]*\.googlesource\.com/[^/]+/\+/([0-9a-f]{40})"),
     re.compile(r"https?://[^/]*\.googlesource\.com/[^/]+/\+/([0-9a-f]{7,40})"),
 ]

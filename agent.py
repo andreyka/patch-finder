@@ -57,9 +57,6 @@ AUTHORITY_SOURCES = [
     "osv.dev",
     "api.osv.dev",
     "github.com/advisories",
-    "issues.chromium.org",
-    "crbug.com",
-    "bugs.chromium.org",
 ]
 
 GITHUB_SECURITY_ADVISORY_MARKERS = ("github.com/", "/security/advisories/")
