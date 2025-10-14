@@ -85,6 +85,7 @@ outlines-core==0.2.11
 packaging==25.0
 partial-json-parser==0.2.1.1.post6
 pillow==11.3.0
+playwright==1.49.0
 prometheus-client==0.23.1
 prometheus-fastapi-instrumentator==7.1.0
 propcache==0.4.0

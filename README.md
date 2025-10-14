@@ -61,6 +61,7 @@ The agent can handle CVEs from various ecosystems:
 uv venv --python 3.12
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 uv pip install -r requirements.txt
+python -m playwright install chromium
 ```
 
 2. Set the required environment variables:
