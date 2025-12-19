@@ -12,26 +12,26 @@ Patch Finder implements a **Cycle-Verification** architecture, where an LLM agen
 
 ```mermaid
 graph TD
-    User[User Request (CVE-ID)] --> Bootstrap[Bootstrap Phase]
-    Bootstrap -- "Initial Evidence" --> Agent[Patch Finder Agent]
+    User["User Request (CVE-ID)"] --> Bootstrap["Bootstrap Phase"]
+    Bootstrap -- "Initial Evidence" --> Agent["Patch Finder Agent"]
     
     subgraph "Agent Loop"
-    Agent --> ToolCall{Decision}
-    ToolCall -- "Web Search" --> Search[Google Search]
-    ToolCall -- "Fetch URL" --> Fetch[Web Scraper]
+    Agent --> ToolCall{"Decision"}
+    ToolCall -- "Web Search" --> Search["Google Search"]
+    ToolCall -- "Fetch URL" --> Fetch["Web Scraper"]
     Search --> Agent
     Fetch --> Agent
     end
 
-    Agent -- "Candidate Found" --> Verifier[Verification Logic]
+    Agent -- "Candidate Found" --> Verifier["Verification Logic"]
     
     subgraph "Verification"
-    Verifier -- "Check Authority" --> NVD[NVD/OSV/GHSA]
-    Verifier -- "Check Commit" --> CommitParse[Commit Parser]
+    Verifier -- "Check Authority" --> NVD["NVD/OSV/GHSA"]
+    Verifier -- "Check Commit" --> CommitParse["Commit Parser"]
     end
     
     CommitParse -- "Confirmed Fix" --> Agent
-    Agent -- "Final Result (JSON)" --> Output[Structured Output]
+    Agent -- "Final Result (JSON)" --> Output["Structured Output"]
 ```
 
 ### Components
