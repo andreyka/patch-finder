@@ -8,40 +8,40 @@
 
 ### Architecture
 
-Patch Finder implements a **Cycle-Verification** architecture, where an LLM agent iteratively gathers evidence, formulates search strategies, and validates potential fix commits against authoritative sources.
+Patch Finder implements a **Bootstrap-First** architecture. Before the AI agent starts, a deterministic "Bootstrap Phase" pre-fetches authoritative data to ground the agent's reasoning. The LLM then orchestrates a search loop to fill in missing details (like finding the specific commit hash referenced in a bug report).
 
 ```mermaid
 graph TD
     User["User Request (CVE-ID)"] --> Bootstrap["Bootstrap Phase"]
+    
+    subgraph "Evidence Collection"
+    Bootstrap -- "Fetch" --> NVD["NVD/CVE.org"]
+    Bootstrap -- "Fetch" --> GHSA["GitHub Advisory"]
+    Bootstrap -- "Fetch" --> OSV["OSV.dev"]
+    end
+    
     Bootstrap -- "Initial Evidence" --> Agent["Patch Finder Agent"]
     
-    subgraph "Agent Loop"
+    subgraph "Agent Reasoning Loop"
     Agent --> ToolCall{"Decision"}
     ToolCall -- "Web Search" --> Search["Google Search"]
     ToolCall -- "Fetch URL" --> Fetch["Web Scraper"]
     Search --> Agent
     Fetch --> Agent
     end
-
-    Agent -- "Candidate Found" --> Verifier["Verification Logic"]
     
-    subgraph "Verification"
-    Verifier -- "Check Authority" --> NVD["NVD/OSV/GHSA"]
-    Verifier -- "Check Commit" --> CommitParse["Commit Parser"]
-    end
-    
-    CommitParse -- "Confirmed Fix" --> Agent
+    Agent -- "Analysis & Verification" --> Agent
     Agent -- "Final Result (JSON)" --> Output["Structured Output"]
 ```
 
 ### Components
 
-1.  **Patch Finder Agent**: The core intelligence.
-    *   **Role**: Analyzes CVE descriptions, plans search queries, and synthesizes information from multiple sources.
-    *   **Engine**: Powered by `openai/gpt-oss-20b` running on a local **vLLM** deployment.
+1.  **Bootstrap Module**: The grounding engine.
+    *   **Role**: Automatically queries NVD, OSV, and GitHub Security Advisories *before* the agent starts. This ensures the agent has ground-truth headers, references, and descriptions immediately.
 
-2.  **Bootstrap Module**: The initial reconnaissance.
-    *   **Role**: Automatically fetches data from NVD, OSV, and GitHub Security Advisories before the agent starts, providing a "warm start" with high-quality evidence.
+2.  **Patch Finder Agent**: The core intelligence.
+    *   **Role**: Analyzes the "Bootstrapped" evidence to form a search strategy. It uses tools to find the actual code change when standard advisories only link to bug reports or generic landing pages.
+    *   **Verification**: The agent internally verifies candidate commits against the authoritative data (e.g., "Does this commit match the NVD description?").
 
 3.  **Tools & Capabilities**:
     *   **Web Search**: Targeted queries to find bug tracker entries, mailing list discussions, and commit references.
